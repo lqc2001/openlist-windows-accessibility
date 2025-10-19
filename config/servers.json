@@ -1,0 +1,23 @@
+{
+  "servers": [
+    {
+      "name": "115",
+      "url": "http://j.yzfycz.cn",
+      "port": 5244,
+      "username": "lqc",
+      "ignore_ssl_errors": true,
+      "password": "Z0FBQUFBQm84NDYtcVJyVkRNRG5rYVN0LWhMNV9OZk5JdWZDbnNMaHVYa3JEYWoyTDBaMXdrZ25tM3Y4RUdIeXF2TGZxekd1SnBCYU1oTVZOSno5M1RzaGw1QUdlX0REc0E9PQ==",
+      "id": "server_1"
+    },
+    {
+      "name": "资源库",
+      "url": "https://pan.imyjy.cn/",
+      "port": 443,
+      "username": "lqc",
+      "ignore_ssl_errors": false,
+      "password": "",
+      "id": "server_2"
+    }
+  ],
+  "version": "1.0"
+}
