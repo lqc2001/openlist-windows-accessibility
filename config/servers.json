@@ -6,7 +6,7 @@
       "port": 5244,
       "username": "lqc",
       "ignore_ssl_errors": true,
-      "password": "Z0FBQUFBQm84NDYtcVJyVkRNRG5rYVN0LWhMNV9OZk5JdWZDbnNMaHVYa3JEYWoyTDBaMXdrZ25tM3Y4RUdIeXF2TGZxekd1SnBCYU1oTVZOSno5M1RzaGw1QUdlX0REc0E9PQ==",
+      "password": "Z0FBQUFBQm85U0xlcjh4aFI2Slo5V0FwdmpkYXRvVHE4dWFhXzZBNlR5dHFYZ1dlN0JKRzMxUFY1ZVpZY3RtRFZ1VE1vMjd6TjBlSVQ4bUFoM1VhUy1oc08tdXBIRXB3ZVE9PQ==",
       "id": "server_1"
     },
     {
@@ -15,7 +15,7 @@
       "port": 443,
       "username": "lqc",
       "ignore_ssl_errors": false,
-      "password": "",
+      "password": "Z0FBQUFBQm85U0xlaHZmU1RXR3JCSWpzWWw5QUYybGh6UXpFSG1xN3RyaFkzWkMwUzQ4SHBzQjg4SlYyYldyeEU3emxDdXhyUWtiZEpzVTV0YW4zT1BoakZPRjBaTVY2SGc9PQ==",
       "id": "server_2"
     }
   ],

@@ -777,20 +777,14 @@ class MainFrame(wx.Frame):
                 self.logger.warning("音频控制器不可用，跳过设备菜单初始化")
                 return
 
-            # 获取菜单栏中的播放菜单
             menubar = self.GetMenuBar()
             if not menubar:
                 return
 
-            # 找到播放菜单（索引1）
             play_menu = menubar.GetMenu(1)
             if not play_menu:
                 return
 
-            # 创建动态设备菜单
-            device_menu = self.audio_controller.create_device_menu(play_menu)
-
-            # 找到并删除占位符菜单项
             placeholder_pos = None
             for i in range(play_menu.GetMenuItemCount()):
                 item = play_menu.FindItemByPosition(i)
@@ -798,19 +792,17 @@ class MainFrame(wx.Frame):
                     placeholder_pos = i
                     break
 
-            if placeholder_pos is not None:
-                # 删除占位符
-                play_menu.Remove(self.device_menu_placeholder)
-
-                # 在原位置插入设备子菜单
-                play_menu.InsertSubMenu(placeholder_pos, device_menu, "音频设备(&D)")
-
-                # 保存设备菜单引用
-                self.device_menu = device_menu
-
-                self.logger.info("音频设备菜单初始化完成")
-            else:
+            if placeholder_pos is None:
                 self.logger.warning("未找到设备菜单占位符")
+                return
+
+            play_menu.Remove(self.device_menu_placeholder)
+
+            self.device_menu = wx.Menu()
+            play_menu.InsertSubMenu(placeholder_pos, self.device_menu, "音频设备(&D)")
+            self.refresh_device_menu()
+
+            self.logger.info("音频设备菜单初始化完成")
 
         except Exception as e:
             self.logger.error(f"初始化音频设备菜单失败: {e}")
@@ -827,38 +819,40 @@ class MainFrame(wx.Frame):
             if not hasattr(self, 'device_menu') or not self.device_menu:
                 return
 
-            # 清空当前设备菜单
             self.device_menu.Clear()
 
-            # 重新创建设备菜单项
             devices = self.audio_controller.get_available_devices()
-            current_device = self.audio_controller.get_current_device()
+            current_info = self.audio_controller.audio_player.player_core.get_current_audio_device_info()
+            current_key = (current_info.get('module'), current_info.get('id'))
 
             for device in devices:
-                device_name = device['name']
-                device_desc = device['description']
+                device_name = device.get('name') or "未命名设备"
+                device_desc = device.get('description') or ""
+                module_name = device.get('module')
+                device_id = device.get('id')
 
-                # 创建菜单项标签
-                if device_name == current_device:
-                    label = f"✓ {device_name} - {device_desc}"
-                else:
+                if device_desc and device_desc != device_name:
                     label = f"{device_name} - {device_desc}"
+                else:
+                    label = device_name
 
-                # 创建菜单项
-                menu_item = self.device_menu.Append(
-                    wx.ID_ANY,
-                    label,
-                    f"切换到 {device_name}"
-                )
+                help_text = "切换音频输出设备"
+                if device.get('is_default'):
+                    help_text = "恢复系统默认音频输出设备"
+                elif module_name:
+                    help_text += f" (模块: {module_name})"
 
-                # 绑定事件
+                menu_item = self.device_menu.AppendRadioItem(wx.ID_ANY, label, help_text)
+
+                if (module_name, device_id) == current_key or (device.get('is_default') and current_key == (None, None)):
+                    menu_item.Check(True)
+
                 self.Bind(
                     wx.EVT_MENU,
-                    lambda event, name=device_name: self._on_device_selected(name),
+                    lambda event, info=device: self._on_device_selected(info),
                     menu_item
                 )
 
-            # 如果没有设备，添加默认选项
             if not devices:
                 self.device_menu.Append(wx.ID_SEPARATOR)
                 no_device_item = self.device_menu.Append(
@@ -873,12 +867,12 @@ class MainFrame(wx.Frame):
         except Exception as e:
             self.logger.error(f"刷新音频设备菜单失败: {e}")
 
-    def _on_device_selected(self, device_name: str):
+    def _on_device_selected(self, device):
         """设备选择事件处理"""
         try:
-            success = self.audio_controller.set_audio_device(device_name)
+            success = self.audio_controller.set_audio_device(device)
+            device_name = device.get('name') if isinstance(device, dict) else str(device)
             if success:
-                # 刷新设备菜单以显示新的选中状态
                 self.refresh_device_menu()
                 self.logger.info(f"已切换到音频设备: {device_name}")
             else:

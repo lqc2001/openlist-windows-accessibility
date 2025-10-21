@@ -100,13 +100,10 @@ class FileManagerWindow(wx.Frame):
         # 播放菜单
         play_menu = wx.Menu()
 
-        # 音频设备子菜单
-        device_menu = wx.Menu()
-        default_device_item = device_menu.AppendRadioItem(wx.ID_ANY, "默认设备", "使用默认音频设备")
-        speaker_item = device_menu.AppendRadioItem(wx.ID_ANY, "扬声器", "使用扬声器")
-        headphone_item = device_menu.AppendRadioItem(wx.ID_ANY, "耳机", "使用耳机")
-
+        # 音频设备子菜单（根据VLC实际输出设备动态生成）
+        device_menu = self.audio_controller.create_device_menu(play_menu)
         play_menu.AppendSubMenu(device_menu, "音频设备(&D)", "选择音频输出设备")
+        self.device_menu = device_menu
         play_menu.AppendSeparator()
 
         # 播放控制
@@ -179,11 +176,6 @@ class FileManagerWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_seek_forward, seek_forward_item)
         self.Bind(wx.EVT_MENU, self.on_volume_up, volume_up_item)
         self.Bind(wx.EVT_MENU, self.on_volume_down, volume_down_item)
-
-        # 音频设备事件
-        self.Bind(wx.EVT_MENU, lambda e: self.on_audio_device("默认设备"), default_device_item)
-        self.Bind(wx.EVT_MENU, lambda e: self.on_audio_device("扬声器"), speaker_item)
-        self.Bind(wx.EVT_MENU, lambda e: self.on_audio_device("耳机"), headphone_item)
 
         # 倍速事件
         self.Bind(wx.EVT_MENU, lambda e: self.on_set_playback_rate(0.5), speed_0_5x)
@@ -996,11 +988,6 @@ class FileManagerWindow(wx.Frame):
     def on_volume_down(self, event):
         """音量减少菜单事件"""
         self.audio_controller.volume_down(5)
-
-    def on_audio_device(self, device_name):
-        """音频设备选择事件"""
-        self.audio_controller.set_audio_device(device_name)
-        self._update_status(f"音频设备已切换到: {device_name}")
 
     def on_set_playback_rate(self, rate):
         """设置播放倍速事件"""

@@ -7,7 +7,10 @@
 
 import os
 import time
+import platform
 from typing import Optional, Callable
+
+import vlc
 from src.core.logger import get_logger
 from .vlc_loader import VLCLoader
 
@@ -64,10 +67,11 @@ class MediaPlayerCore:
         self.repeat_mode = "none"  # none, one, all
 
         # 音频设备管理
-        self.current_audio_device = None
+        self.current_audio_device = self._default_audio_device_entry()
         self.available_audio_devices = []
         self.device_cache_time = 0
         self.device_cache_timeout = 30  # 缓存30秒
+        self._audio_output_module = None
 
         # 事件回调
         self.event_callbacks = {
@@ -99,6 +103,9 @@ class MediaPlayerCore:
 
             # 设置事件监听
             self._setup_event_manager()
+
+            # 确保音频输出模块可用
+            self._select_audio_output_module()
 
             self.logger.info("媒体播放器初始化成功")
 
@@ -631,6 +638,111 @@ class MediaPlayerCore:
                 except Exception as e:
                     self.logger.error(f"事件回调执行失败: {e}")
 
+    @staticmethod
+    def _decode_c_string(value) -> str:
+        """将C风格字符串安全解码为Python字符串"""
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            for encoding in ('utf-8', 'gbk'):
+                try:
+                    return value.decode(encoding)
+                except UnicodeDecodeError:
+                    continue
+            return value.decode('utf-8', errors='ignore')
+        return str(value)
+
+    @staticmethod
+    def _normalize_device_id(device_id: Optional[str]) -> Optional[str]:
+        """规范化VLC返回的设备标识"""
+        if device_id is None:
+            return None
+        if isinstance(device_id, bytes):
+            device_id = device_id.decode('utf-8', errors='ignore')
+        device_id = str(device_id).strip()
+        return device_id or None
+
+    def _default_audio_device_entry(self) -> dict:
+        """构造默认音频设备描述"""
+        return {
+            'id': None,
+            'name': '默认设备',
+            'description': '系统默认音频输出设备',
+            'module': None,
+            'module_description': '系统默认音频输出设备',
+            'is_default': True
+        }
+
+    def _select_audio_output_module(self) -> Optional[str]:
+        """确保使用能够枚举真实设备的音频输出模块"""
+        if self._audio_output_module is not None:
+            return self._audio_output_module
+
+        if not self.vlc_player or not hasattr(self.vlc_player, 'audio_output_set'):
+            return None
+
+        if platform.system() == 'Windows':
+            candidates = ['mmdevice', 'directsound', 'waveout']
+        else:
+            candidates = [None]
+
+        for module in candidates:
+            try:
+                if module:
+                    self.vlc_player.audio_output_set(module)
+                self._audio_output_module = module
+                self.logger.debug(f"音频输出模块选择: {module or '默认'}")
+                return module
+            except Exception as e:
+                self.logger.debug(f"设置音频输出模块失败 {module}: {e}")
+
+        self._audio_output_module = None
+        return None
+
+    def _enumerate_audio_output_devices(self) -> list:
+        """使用 audio_output_device_enum 枚举当前模块下的音频设备"""
+        devices = []
+
+        if not self.vlc_player or not hasattr(self.vlc_player, 'audio_output_device_enum'):
+            return devices
+
+        try:
+            list_head = self.vlc_player.audio_output_device_enum()
+        except AttributeError:
+            self.logger.debug("当前VLC版本不支持 audio_output_device_enum")
+            return devices
+        except Exception as e:
+            self.logger.debug(f"获取音频设备列表失败: {e}")
+            return devices
+
+        node = list_head
+        seen = set()
+        try:
+            while node:
+                struct = node.contents
+                device_id = self._decode_c_string(getattr(struct, 'device', None))
+                description = self._decode_c_string(getattr(struct, 'description', None))
+                node = getattr(struct, 'next', None)
+
+                if not device_id or device_id in seen:
+                    continue
+
+                seen.add(device_id)
+                friendly = description or device_id
+                devices.append({
+                    'id': device_id,
+                    'name': friendly,
+                    'description': friendly,
+                })
+        finally:
+            if list_head:
+                try:
+                    vlc.libvlc_audio_output_device_list_release(list_head)
+                except Exception as release_err:
+                    self.logger.debug(f"释放音频设备列表失败: {release_err}")
+
+        return devices
+
     def get_available_audio_devices(self, force_refresh: bool = False) -> list:
         """
         获取可用的音频设备列表
@@ -643,106 +755,64 @@ class MediaPlayerCore:
         """
         import time
 
-        # 检查缓存是否有效
         current_time = time.time()
-        if (not force_refresh and
-            self.available_audio_devices and
-            current_time - self.device_cache_time < self.device_cache_timeout):
-            return self.available_audio_devices
+        if (not force_refresh and self.available_audio_devices and
+                current_time - self.device_cache_time < self.device_cache_timeout):
+            return list(self.available_audio_devices)
 
+        devices = []
         try:
             if not self.vlc_instance:
                 self.logger.warning("VLC实例不可用，无法获取音频设备")
-                return self._get_fallback_devices()
-
-            vlc_lib = self.vlc_loader.get_vlc_lib()
-
-            # 枚举音频输出设备
-            devices = []
-
-            # Windows平台：尝试使用VLC枚举设备
-            # 注意：VLC的音频设备API在不同版本中可能有差异
-            try:
-                # 尝试获取VLC的音频输出模块
-                audio_outputs = vlc_lib.libvlc_audio_output_list_get(self.vlc_instance)
-                if audio_outputs:
-                    # 遍历音频输出模块
-                    current = audio_outputs
-                    while current:
-                        output = current.contents
-                        if output:
-                            devices.append({
-                                'name': output.name.decode('utf-8'),
-                                'description': output.description.decode('utf-8')
-                            })
-                        current = current.next
-                    vlc_lib.libvlc_audio_output_list_release(audio_outputs)
-            except:
-                # 如果API调用失败，静默跳过
-                self.logger.debug("VLC音频输出设备枚举API不可用，使用回退方案")
-
-            # 如果VLC API失败，使用回退方案
-            if not devices:
-                devices = self._get_fallback_devices()
-
-            # 添加默认设备选项
-            if not any(d['name'] == '默认设备' for d in devices):
-                devices.insert(0, {
-                    'name': '默认设备',
-                    'description': '系统默认音频输出设备'
-                })
-
-            # 更新缓存
-            self.available_audio_devices = devices
-            self.device_cache_time = current_time
-
-            self.logger.info(f"发现 {len(devices)} 个音频设备")
-            for device in devices:
-                self.logger.debug(f"  - {device['name']}: {device['description']}")
-
-            return devices
-
+            else:
+                self._select_audio_output_module()
+                devices = self._enumerate_audio_output_devices()
         except Exception as e:
             self.logger.error(f"获取音频设备列表失败: {e}")
-            return self._get_fallback_devices()
+            devices = []
+
+        result_devices = [self._default_audio_device_entry()]
+
+        module_name = self._audio_output_module
+        module_desc = '系统默认音频输出设备' if module_name is None else module_name
+
+        for device in devices:
+            result_devices.append({
+                'id': device['id'],
+                'name': device['name'],
+                'description': device['description'],
+                'module': module_name,
+                'module_description': module_desc,
+                'is_default': False
+            })
+
+        if len(result_devices) == 1:
+            self.logger.debug("音频设备枚举为空，使用默认设备")
+
+        self.available_audio_devices = result_devices
+        self.device_cache_time = current_time
+
+        current_info = self.get_current_audio_device_info()
+        self.current_audio_device = current_info
+
+        self.logger.info(f"发现 {len(result_devices)} 个音频设备")
+        for device in result_devices:
+            self.logger.debug(
+                f"  - {device['name']} (id: {device.get('id') or 'default'})"
+            )
+
+        return list(result_devices)
 
     def _get_fallback_devices(self) -> list:
         """获取回退设备列表（当VLC API不可用时）"""
-        import platform
+        return [self._default_audio_device_entry()]
 
-        # 基本的常见设备列表
-        fallback_devices = [
-            {
-                'name': '默认设备',
-                'description': '系统默认音频输出设备'
-            }
-        ]
-
-        if platform.system() == 'Windows':
-            # Windows常见的音频设备
-            fallback_devices.extend([
-                {
-                    'name': '扬声器',
-                    'description': '主扬声器设备'
-                },
-                {
-                    'name': '耳机',
-                    'description': '耳机设备'
-                },
-                {
-                    'name': '数字输出',
-                    'description': 'S/PDIF数字输出'
-                }
-            ])
-
-        return fallback_devices
-
-    def set_audio_device(self, device_name: str) -> bool:
+    def set_audio_device(self, device) -> bool:
         """
         设置音频输出设备
 
         Args:
-            device_name: 设备名称
+            device: 设备描述字典或设备名称/ID
 
         Returns:
             bool: 是否设置成功
@@ -752,46 +822,76 @@ class MediaPlayerCore:
                 self.logger.error("播放器未初始化，无法设置音频设备")
                 return False
 
-            # 验证设备是否可用
-            available_devices = self.get_available_audio_devices()
-            device_names = [d['name'] for d in available_devices]
+            self._select_audio_output_module()
 
-            if device_name not in device_names:
-                self.logger.error(f"不可用的音频设备: {device_name}")
+            available_devices = self.available_audio_devices or self.get_available_audio_devices(force_refresh=True)
+
+            target_entry = None
+            if isinstance(device, dict):
+                target_entry = device
+            else:
+                normalized = self._normalize_device_id(device)
+                for candidate in available_devices:
+                    if normalized in (
+                        self._normalize_device_id(candidate.get('id')),
+                        self._normalize_device_id(candidate.get('name'))
+                    ):
+                        target_entry = candidate
+                        break
+
+            if target_entry is None:
+                if isinstance(device, dict):
+                    display = device.get('name', '默认设备')
+                else:
+                    display = device
+                self.logger.error(f"不可用的音频设备: {display}")
                 return False
 
-            # 设备设置 - 使用更安全的方式
-            vlc_lib = self.vlc_loader.get_vlc_lib()
+            target_id = self._normalize_device_id(target_entry.get('id'))
+            display_name = target_entry.get('name', '默认设备')
 
-            if device_name == '默认设备':
-                # 对于默认设备，不进行特殊设置让VLC自动选择
-                self.logger.debug("使用默认音频设备")
+            try:
+                target_value = '' if target_id is None else target_id
+                if hasattr(self.vlc_player, 'audio_output_device_set'):
+                    self.vlc_player.audio_output_device_set(None, target_value)
+                else:
+                    self.logger.error("当前VLC播放器缺少 audio_output_device_set 接口")
+                    return False
+            except Exception as e:
+                self.logger.error(f"设置音频输出设备失败: {e}")
+                return False
+
+            try:
+                current_raw = self.vlc_player.audio_output_device_get()
+            except Exception as e:
+                self.logger.debug(f"读取当前音频设备失败: {e}")
+                current_raw = None
+
+            current_id = self._normalize_device_id(current_raw)
+            if target_id is not None and current_id != target_id:
+                self.logger.warning(f"期望切换到 {display_name}，但实际为 {current_id or '默认'}")
+
+            if current_id is None:
+                self.current_audio_device = self._default_audio_device_entry()
             else:
-                # 尝试设置指定设备
-                try:
-                    # 检查播放器是否有媒体
-                    if self.vlc_player.get_media():
-                        # 只有在有媒体时才能设置设备
-                        if hasattr(vlc_lib, 'libvlc_audio_output_device_set'):
-                            # 尝试使用DirectSound
-                            vlc_lib.libvlc_audio_output_device_set(
-                                self.vlc_player,
-                                'directsound',
-                                device_name.encode('utf-8')
-                            )
-                        else:
-                            self.logger.debug("VLC音频设备设置API不可用")
-                    else:
-                        self.logger.debug("需要先加载媒体才能设置音频设备")
-                except Exception as e:
-                    self.logger.debug(f"音频设备设置失败: {e}")
-                    # 不抛出异常，继续执行
+                matched = None
+                for candidate in self.available_audio_devices:
+                    if self._normalize_device_id(candidate.get('id')) == current_id:
+                        matched = candidate
+                        break
+                if not matched:
+                    matched = {
+                        'id': current_id,
+                        'name': display_name,
+                        'description': display_name,
+                        'module': self._audio_output_module,
+                        'module_description': self._audio_output_module or '系统默认音频输出设备',
+                        'is_default': False
+                    }
+                self.current_audio_device = matched
 
-            self.current_audio_device = device_name
-            self.logger.info(f"音频设备已设置为: {device_name}")
-
-            # 触发设备变化事件
-            self._trigger_event('on_audio_device_changed', device_name)
+            self.logger.info(f"音频设备已设置为: {self.current_audio_device.get('name', '默认设备')}")
+            self._trigger_event('on_audio_device_changed', self.current_audio_device.get('name'))
 
             return True
 
@@ -801,7 +901,36 @@ class MediaPlayerCore:
 
     def get_current_audio_device(self) -> str:
         """获取当前音频设备"""
-        return self.current_audio_device or '默认设备'
+        info = self.get_current_audio_device_info()
+        return info.get('name', '默认设备')
+
+    def get_current_audio_device_info(self) -> dict:
+        """获取当前音频设备的完整信息"""
+        if not self.vlc_player or not hasattr(self.vlc_player, 'audio_output_device_get'):
+            return self._default_audio_device_entry()
+
+        try:
+            current_raw = self.vlc_player.audio_output_device_get()
+        except Exception as e:
+            self.logger.debug(f"读取当前音频设备信息失败: {e}")
+            current_raw = None
+
+        current_id = self._normalize_device_id(current_raw)
+        if current_id is None:
+            return self._default_audio_device_entry()
+
+        for device in self.available_audio_devices:
+            if self._normalize_device_id(device.get('id')) == current_id:
+                return dict(device)
+
+        return {
+            'id': current_id,
+            'name': current_id,
+            'description': current_id,
+            'module': self._audio_output_module,
+            'module_description': self._audio_output_module or '系统默认音频输出设备',
+            'is_default': False
+        }
 
     def refresh_audio_devices(self) -> list:
         """强制刷新音频设备列表"""

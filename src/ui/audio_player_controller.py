@@ -336,17 +336,18 @@ class AudioPlayerController:
 
         try:
             devices = self.audio_player.player_core.get_available_audio_devices()
+            self.audio_devices = devices
             return devices
         except Exception as e:
             self.logger.error(f"获取音频设备列表失败: {e}")
             return [{"name": "默认设备", "description": "系统默认音频输出设备"}]
 
-    def set_audio_device(self, device_name: str) -> bool:
+    def set_audio_device(self, device) -> bool:
         """
         设置音频设备
 
         Args:
-            device_name: 设备名称
+            device: 设备信息字典或设备名称/ID
 
         Returns:
             bool: 是否成功
@@ -355,11 +356,12 @@ class AudioPlayerController:
             return False
 
         try:
-            success = self.audio_player.player_core.set_audio_device(device_name)
+            success = self.audio_player.player_core.set_audio_device(device)
             if success:
-                self.current_device = device_name
+                info = self.audio_player.player_core.get_current_audio_device_info()
+                self.current_device = info.get('name')
                 self._update_status_bar()
-                self.logger.info(f"音频设备已设置为: {device_name}")
+                self.logger.info(f"音频设备已设置为: {self.current_device}")
             return success
         except Exception as e:
             self.logger.error(f"设置音频设备失败: {e}")
@@ -371,7 +373,8 @@ class AudioPlayerController:
             return "默认设备"
 
         try:
-            return self.audio_player.player_core.get_current_audio_device()
+            info = self.audio_player.player_core.get_current_audio_device_info()
+            return info.get('name', '默认设备')
         except Exception as e:
             self.logger.error(f"获取当前音频设备失败: {e}")
             return "默认设备"
@@ -383,6 +386,7 @@ class AudioPlayerController:
 
         try:
             devices = self.audio_player.player_core.refresh_audio_devices()
+            self.audio_devices = devices
             return devices
         except Exception as e:
             self.logger.error(f"刷新音频设备列表失败: {e}")
@@ -400,35 +404,47 @@ class AudioPlayerController:
             device_menu = wx.Menu()
 
             # 获取可用设备
-            devices = self.get_available_devices()
-            current_device = self.get_current_device()
-
-            # 为每个设备创建菜单项
-            for device in devices:
-                device_name = device['name']
-                device_desc = device['description']
-
-                # 创建菜单项标签
-                if device_name == current_device:
-                    label = f"✓ {device_name} - {device_desc}"
-                else:
-                    label = f"{device_name} - {device_desc}"
-
-                # 创建菜单项
-                menu_item = device_menu.Append(
+            if not self.is_initialized:
+                no_device_item = device_menu.Append(
                     wx.ID_ANY,
-                    label,
-                    f"切换到 {device_name}"
+                    "播放器未初始化",
+                    "音频播放功能尚未就绪"
                 )
+                no_device_item.Enable(False)
+                return device_menu
 
-                # 绑定事件
+            devices = self.get_available_devices()
+            current_info = self.audio_player.player_core.get_current_audio_device_info()
+            current_key = (current_info.get('module'), current_info.get('id'))
+
+            for device in devices:
+                device_name = device.get('name') or "未命名设备"
+                device_desc = device.get('description') or ""
+                module_name = device.get('module')
+                device_id = device.get('id')
+
+                if device_desc and device_desc != device_name:
+                    label = f"{device_name} - {device_desc}"
+                else:
+                    label = device_name
+
+                help_text = "切换音频输出设备"
+                if device.get('is_default'):
+                    help_text = "恢复系统默认音频输出设备"
+                elif module_name:
+                    help_text += f" (模块: {module_name})"
+
+                menu_item = device_menu.AppendRadioItem(wx.ID_ANY, label, help_text)
+
+                if (module_name, device_id) == current_key or (device.get('is_default') and current_key == (None, None)):
+                    menu_item.Check(True)
+
                 self.parent_window.Bind(
                     wx.EVT_MENU,
-                    lambda event, name=device_name: self._on_device_selected(name),
+                    lambda event, info=device: self._on_device_selected(info),
                     menu_item
                 )
 
-            # 如果没有设备，添加默认选项
             if not devices:
                 device_menu.Append(wx.ID_SEPARATOR)
                 no_device_item = device_menu.Append(
@@ -442,27 +458,30 @@ class AudioPlayerController:
 
         except Exception as e:
             self.logger.error(f"创建设备菜单失败: {e}")
-            # 返回空菜单
             return wx.Menu()
 
-    def _on_device_selected(self, device_name: str):
+    def _on_device_selected(self, device):
         """
         设备选择事件处理
 
         Args:
-            device_name: 选择的设备名称
+            device: 选择的设备信息
         """
         try:
-            success = self.set_audio_device(device_name)
+            success = self.set_audio_device(device)
+            device_name = device.get('name') if isinstance(device, dict) else str(device)
             if success:
-                # 显示成功消息
+                if hasattr(self.parent_window, "_update_status"):
+                    try:
+                        self.parent_window._update_status(f"音频设备已切换到: {device_name}")
+                    except Exception as status_err:
+                        self.logger.debug(f"更新状态栏时发生异常: {status_err}")
                 wx.MessageBox(
                     f"已切换到: {device_name}",
                     "音频设备",
                     wx.OK | wx.ICON_INFORMATION
                 )
             else:
-                # 显示失败消息
                 wx.MessageBox(
                     f"切换音频设备失败: {device_name}",
                     "错误",

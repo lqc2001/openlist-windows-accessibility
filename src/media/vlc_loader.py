@@ -92,16 +92,16 @@ class VLCLoader:
             if self._load_system_vlc():
                 return True
         else:
-            # 默认模式：优先使用系统VLC，因为它更稳定
-            # 1. 尝试加载系统VLC
-            if self._load_system_vlc():
-                return True
-
-            # 2. 尝试加载程序目录VLC
+            # 默认模式：优先使用程序目录(便携版)的VLC，再回退到系统安装
+            # 1. 尝试加载程序目录VLC
             if self._load_program_vlc():
                 return True
 
-            # 3. 最后尝试内置VLC库
+            # 2. 尝试加载系统VLC
+            if self._load_system_vlc():
+                return True
+
+            # 3. 尝试加载内置VLC库
             if self._load_embedded_vlc():
                 return True
 
