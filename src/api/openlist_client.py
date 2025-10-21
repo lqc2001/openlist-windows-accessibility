@@ -442,14 +442,14 @@ class OpenListClient:
         except Exception as e:
             self.logger.error(f"登出失败: {e}")
 
-    def get_file_list(self, path="/", page=1, per_page=100):
+    def get_file_list(self, path="/", page=1, per_page=0):
         """
         获取文件列表
 
         Args:
             path: 文件路径，默认为根目录
             page: 页码，默认为第1页
-            per_page: 每页文件数，默认为100
+            per_page: 每页文件数，默认为0（表示获取所有文件）
 
         Returns:
             文件列表数据
@@ -503,12 +503,14 @@ class OpenListClient:
                         files.append(file_info)
 
                     self.logger.debug(f"获取到{len(files)}个文件，总计{total}个")
+                    # 当per_page=0时，total_pages设为1（表示所有文件在一页中）
+                    total_pages = 1 if per_page == 0 else (total + per_page - 1) // per_page
                     return {
                         'files': files,
                         'total': total,
                         'page': page,
                         'per_page': per_page,
-                        'total_pages': (total + per_page - 1) // per_page
+                        'total_pages': total_pages
                     }
                 else:
                     error_msg = response.get('message', '获取文件列表失败')
@@ -544,12 +546,14 @@ class OpenListClient:
                     }
                 ]
 
+                # 当per_page=0时，total_pages设为1（表示所有文件在一页中）
+                total_pages = 1 if per_page == 0 else (len(mock_files) + per_page - 1) // per_page
                 return {
                     'files': mock_files,
                     'total': len(mock_files),
                     'page': page,
                     'per_page': per_page,
-                    'total_pages': (len(mock_files) + per_page - 1) // per_page
+                    'total_pages': total_pages
                 }
 
         except Exception as e:
