@@ -484,12 +484,18 @@ class OpenListClient:
                         if item.get('is_dir', False):
                             mime_type = 'inode/directory'
                         else:
-                            # AList的type字段是整数，需要根据实际情况判断
+                            # AList的type字段是整数，根据类型映射
                             file_type = item.get('type', 0)
-                            if file_type == 1:  # 文件夹
-                                mime_type = 'inode/directory'
-                            else:
-                                mime_type = 'application/octet-stream'  # 默认文件类型
+                            # 根据API返回的type字段映射文件类型
+                            type_mapping = {
+                                0: 'file',        # 文件
+                                1: 'folder',      # 文件夹
+                                2: 'video',       # 视频
+                                3: 'audio',       # 音频
+                                4: 'text',        # 文本文件
+                                5: 'image'        # 图片
+                            }
+                            mime_type = type_mapping.get(file_type, 'file')
 
                         file_info = {
                             'name': item.get('name', ''),

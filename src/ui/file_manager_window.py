@@ -1243,9 +1243,10 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
         listmix.ListCtrlAutoWidthMixin.__init__(self)
 
         # 设置列
-        self.InsertColumn(0, "名称", width=300)
-        self.InsertColumn(1, "大小", width=100)
-        self.InsertColumn(2, "修改时间", width=200)
+        self.InsertColumn(0, "名称", width=250)
+        self.InsertColumn(1, "类型", width=100)
+        self.InsertColumn(2, "大小", width=100)
+        self.InsertColumn(3, "修改时间", width=150)
 
         self.files = []
         self.sort_column = 0
@@ -1264,8 +1265,9 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
         for i, file_item in enumerate(files):
             index = self.InsertItem(i, self._get_file_icon(file_item["type"]))
             self.SetItem(index, 0, file_item["name"])
-            self.SetItem(index, 1, file_item["size"])
-            self.SetItem(index, 2, file_item["date"])
+            self.SetItem(index, 1, self._get_type_display_name(file_item["type"]))
+            self.SetItem(index, 2, file_item["size"])
+            self.SetItem(index, 3, file_item["date"])
 
         # 自动调整列宽
         self._autosize_columns()
@@ -1292,6 +1294,18 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
             "default": "❓"
         }
         return icons.get(file_type, icons["default"])
+
+    def _get_type_display_name(self, file_type):
+        """获取文件类型的显示名称"""
+        type_names = {
+            "folder": "文件夹",
+            "file": "文件",
+            "video": "视频",
+            "audio": "音频",
+            "text": "文本",
+            "image": "图片"
+        }
+        return type_names.get(file_type, "文件")
 
     def get_selected_items(self):
         """获取选中的文件"""
