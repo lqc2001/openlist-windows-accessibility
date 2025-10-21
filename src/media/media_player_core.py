@@ -8,6 +8,7 @@
 import os
 import time
 import platform
+import threading
 from typing import Optional, Callable
 
 import vlc
@@ -72,6 +73,10 @@ class MediaPlayerCore:
         self.device_cache_time = 0
         self.device_cache_timeout = 30  # 缓存30秒
         self._audio_output_module = None
+        self._audio_device_pending = False
+        self._pending_audio_device_id = None
+        self._device_sync_thread = None
+        self._device_sync_lock = threading.Lock()
 
         # 事件回调
         self.event_callbacks = {
@@ -115,46 +120,54 @@ class MediaPlayerCore:
             raise
 
     def _setup_event_manager(self):
-        """设置VLC事件监听"""
+        """Set up VLC event listeners."""
         try:
             event_manager = self.vlc_player.event_manager()
             vlc_lib = self.vlc_loader.get_vlc_lib()
 
-            # 媒体结束事件
+            # Media end event
             event_manager.event_attach(
                 vlc_lib.EventType.MediaPlayerEndReached,
                 self._on_media_ended
             )
 
-            # 媒体时间变化事件
+            # Playback time changed
             event_manager.event_attach(
                 vlc_lib.EventType.MediaPlayerTimeChanged,
                 self._on_time_changed
             )
 
-            # 播放器状态变化事件 - 尝试不同的事件名称
+            # Player state changed (not available on some builds)
             try:
                 event_manager.event_attach(
                     vlc_lib.EventType.MediaPlayerStateChanged,
                     self._on_state_changed
                 )
             except AttributeError:
-                # 如果新版本没有这个事件，跳过
-                self.logger.warning("MediaPlayerStateChanged事件不可用，跳过状态监听")
+                self.logger.warning("MediaPlayerStateChanged event unavailable; state updates may be limited")
 
-            # 媒体解析结束事件
+            # Player started playing – used to reapply audio device
+            try:
+                event_manager.event_attach(
+                    vlc_lib.EventType.MediaPlayerPlaying,
+                    self._on_media_playing
+                )
+            except AttributeError:
+                self.logger.debug("MediaPlayerPlaying event unavailable; audio device reapply relies on manual calls")
+
+            # Media parsed event
             try:
                 event_manager.event_attach(
                     vlc_lib.EventType.MediaParsedChanged,
                     self._on_media_parsed
                 )
             except AttributeError:
-                # 如果新版本没有这个事件，跳过
-                self.logger.warning("MediaParsedChanged事件不可用，跳过解析监听")
+                self.logger.warning("MediaParsedChanged event unavailable; metadata updates may be limited")
 
         except Exception as e:
-            self.logger.error(f"设置VLC事件监听失败: {e}")
-            # 继续执行，不影响基本播放功能
+            self.logger.error(f"Failed to set up VLC event manager: {e}")
+            # allow playback to continue even if hooks fail
+
 
     def load_media(self, file_path: str) -> bool:
         """
@@ -219,6 +232,9 @@ class MediaPlayerCore:
                 self.logger.error("未加载媒体")
                 return False
 
+            # Ensure selected audio device is applied before playback
+            self._apply_audio_device(reason='pre-play')
+
             # 开始播放
             result = self.vlc_player.play()
             if result == 0:  # VLC返回0表示成功
@@ -270,6 +286,7 @@ class MediaPlayerCore:
                 return False
 
             if self.state == MediaPlayerState.PAUSED:
+                self._apply_audio_device(reason='pre-resume')
                 self.vlc_player.pause()  # VLC的pause()是播放/暂停切换
                 self.state = MediaPlayerState.PLAYING
                 self.logger.info("恢复播放")
@@ -292,7 +309,12 @@ class MediaPlayerCore:
             if not self.vlc_player:
                 return False
 
+            info = self.get_current_audio_device_info()
+            pending_value = self._normalize_device_id(info.get('id')) or ''
+
             self.vlc_player.stop()
+            self._audio_device_pending = True
+            self._pending_audio_device_id = pending_value
             self.state = MediaPlayerState.STOPPED
             self.current_media_info.current_time = 0
             self.logger.info("停止播放")
@@ -609,6 +631,15 @@ class MediaPlayerCore:
         except Exception as e:
             self.logger.error(f"处理状态变化事件失败: {e}")
 
+    def _on_media_playing(self, event):
+        """Handle MediaPlayerPlaying event to reapply audio device if needed."""
+        if self._audio_device_pending:
+            if self._apply_audio_device(reason='playing-event'):
+                self.logger.debug('Audio device reapplied after MediaPlayerPlaying event')
+            else:
+                self.logger.debug('Audio device still pending after MediaPlayerPlaying event')
+
+
     def _on_media_parsed(self, event):
         """媒体解析完成事件"""
         try:
@@ -698,6 +729,254 @@ class MediaPlayerCore:
 
         self._audio_output_module = None
         return None
+
+    def _apply_audio_device(self, reason: str = "manual") -> bool:
+        """Apply the cached audio device selection to VLC."""
+        if not self.vlc_player:
+            return False
+
+        info = self.current_audio_device or self._default_audio_device_entry()
+        device_id = self._normalize_device_id(info.get('id'))
+        module_name = info.get('module') or self._audio_output_module or self._select_audio_output_module()
+        target_value = device_id or ''
+
+        # LibVLC recommends passing None for MMDevice/PulseAudio to switch devices immediately.
+        module_arg = module_name or ''
+        module_for_device_set = None
+        if module_name:
+            lowered = module_name.lower()
+            if lowered in ('mmdevice', 'pulse', 'pulseaudio'):
+                module_for_device_set = None
+            else:
+                module_for_device_set = module_arg
+        py_module_arg = module_for_device_set
+
+        try:
+            if module_arg:
+                try:
+                    self.vlc_player.audio_output_set(module_arg)
+                    self._audio_output_module = module_arg
+                except Exception as module_error:
+                    self.logger.debug(f"Failed to set audio output module ({reason}): {module_error}")
+
+            applied = False
+            if hasattr(self.vlc_player, 'audio_output_device_set'):
+                try:
+                    self.vlc_player.audio_output_device_set(py_module_arg, target_value)
+                    applied = True
+                except Exception as py_vlc_error:
+                    self.logger.debug(f"python-vlc audio_output_device_set failed ({reason}): {py_vlc_error}")
+
+            if not applied:
+                try:
+                    vlc_lib = self.vlc_loader.get_vlc_lib()
+                    module_bytes = module_for_device_set.encode('utf-8') if isinstance(module_for_device_set, str) and module_for_device_set else None
+                    device_bytes = target_value.encode('utf-8') if target_value else b''
+                    vlc_lib.libvlc_audio_output_device_set(self.vlc_player, module_bytes, device_bytes)
+                    applied = True
+                except Exception as c_error:
+                    self.logger.debug(f"libvlc audio_output_device_set failed ({reason}): {c_error}")
+
+            if applied:
+                self._audio_device_pending = False
+                self._pending_audio_device_id = None
+                self.logger.debug(
+                    f"Audio device applied ({reason}): {info.get('name', 'default')} -> {target_value or 'default'}")
+                return True
+
+        except Exception as apply_error:
+            self.logger.debug(f"Applying audio device failed ({reason}): {apply_error}")
+
+        self._audio_device_pending = True
+        self._pending_audio_device_id = target_value
+        return False
+
+    def _current_vlc_device_id(self) -> Optional[str]:
+        """读取当前激活的 VLC 音频设备标识。"""
+        if not self.vlc_player or not hasattr(self.vlc_player, 'audio_output_device_get'):
+            return None
+
+        try:
+            current_raw = self.vlc_player.audio_output_device_get()
+        except Exception as read_error:
+            self.logger.debug(f"读取当前音频设备失败: {read_error}")
+            return None
+
+        return self._normalize_device_id(current_raw)
+
+    def _verify_audio_device_selection(self, expected_id: Optional[str]) -> bool:
+        """验证 VLC 报告的当前设备是否与目标设备一致。"""
+        if expected_id is None:
+            return self._current_vlc_device_id() is None
+        return self._current_vlc_device_id() == expected_id
+
+    def _schedule_audio_device_resync(
+            self,
+            expected_id: Optional[str],
+            device_name: str,
+            retries: int = 3,
+            delay: float = 0.4,
+            force_restart: bool = False
+    ) -> None:
+        """在后台重试应用音频设备，避免阻塞 UI 线程。"""
+        if retries <= 0:
+            self.logger.warning(f'音频设备仍未切换到: {device_name}，请手动重试')
+            self._audio_device_pending = True
+            self._pending_audio_device_id = expected_id
+            return
+
+        with self._device_sync_lock:
+            if self._device_sync_thread and self._device_sync_thread.is_alive():
+                # 合并新的切换请求，交由现有任务处理
+                self._pending_audio_device_id = expected_id
+                self.logger.debug('已有音频设备重试任务在运行，更新待应用的目标设备')
+                return
+
+            def worker():
+                try:
+                    attempts = retries
+                    success = False
+                    wait_time = delay
+                    first_attempt = True
+
+                    while attempts > 0:
+                        if not first_attempt:
+                            time.sleep(max(0.05, wait_time))
+                        first_attempt = False
+
+                        # 如果用户改选了其他设备，提前结束任务
+                        current_expected = self._normalize_device_id(
+                            (self.current_audio_device or {}).get('id')
+                        )
+                        if current_expected != expected_id:
+                            self.logger.debug('检测到新的音频设备选择，取消旧的重试任务')
+                            return
+
+                        restarted = False
+                        needs_restart = (
+                            self.state == MediaPlayerState.PLAYING
+                            and (self._audio_output_module or '').lower() in ('mmdevice', 'pulse', 'pulseaudio')
+                        )
+
+                        if force_restart and needs_restart:
+                            self.logger.debug('后台执行播放重启以应用音频设备')
+                            restarted = self._restart_playback_for_device_change()
+
+                        applied = self._apply_audio_device(reason='device-sync')
+                        if applied or restarted:
+                            if self._verify_audio_device_selection(expected_id):
+                                success = True
+                                break
+
+                            if needs_restart and not restarted:
+                                self.logger.debug('常规设置未生效，尝试后台重启播放')
+                                if self._restart_playback_for_device_change() and self._verify_audio_device_selection(expected_id):
+                                    success = True
+                                    break
+
+                        attempts -= 1
+                        wait_time *= 1.5
+
+                    if not success and self.state == MediaPlayerState.PLAYING:
+                        self.logger.debug('常规重试未成功，尝试通过后台重启播放应用设备')
+                        success = self._restart_playback_for_device_change() and \
+                                  self._verify_audio_device_selection(expected_id)
+
+                    if success:
+                        self._audio_device_pending = False
+                        self._pending_audio_device_id = None
+                        self.logger.info(f'音频设备已设置为: {device_name}')
+                        self._trigger_event('on_audio_device_changed', device_name)
+                    else:
+                        self.logger.error(f'音频设备应用失败: {device_name}')
+                        self._audio_device_pending = True
+                        self._pending_audio_device_id = expected_id
+                finally:
+                    with self._device_sync_lock:
+                        self._device_sync_thread = None
+
+            thread = threading.Thread(
+                target=worker,
+                name='AudioDeviceResync',
+                daemon=True
+            )
+            self._device_sync_thread = thread
+
+        thread.start()
+
+
+    def _restart_playback_for_device_change(self) -> bool:
+        """在播放过程中重启播放器以应用音频设备变更，同时尽量保持当前播放进度。"""
+        if not self.vlc_player or not self.vlc_media:
+            return False
+        if self.state != MediaPlayerState.PLAYING:
+            return False
+
+        try:
+            resume_time = max(0, int(self.vlc_player.get_time()))
+        except Exception:
+            resume_time = 0
+
+        self.logger.debug('尝试通过重启播放来应用音频设备变更')
+
+        try:
+            self.vlc_player.stop()
+        except Exception as stop_err:
+            self.logger.debug(f'停止播放器失败（重启播放）: {stop_err}')
+            return False
+
+        time.sleep(0.05)
+
+        try:
+            self.vlc_player.set_media(self.vlc_media)
+        except Exception as media_err:
+            self.logger.debug(f'重新绑定媒体失败: {media_err}')
+            return False
+
+        applied = self._apply_audio_device(reason='device-restart')
+
+        try:
+            result = self.vlc_player.play()
+        except Exception as play_err:
+            self.logger.error(f'音频设备变更后重启播放失败: {play_err}')
+            return False
+
+        if result != 0:
+            self.logger.error(f'音频设备变更后重启播放失败，VLC返回值: {result}')
+            return False
+
+        target_state = None
+        try:
+            target_state = self.vlc_loader.get_vlc_lib().State.Playing
+        except Exception:
+            target_state = None
+
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            try:
+                state = self.vlc_player.get_state()
+                if target_state is None or state == target_state:
+                    break
+            except Exception:
+                break
+            time.sleep(0.05)
+
+        if resume_time > 0:
+            try:
+                self.vlc_player.set_time(resume_time)
+            except Exception as resume_err:
+                self.logger.debug(f'恢复播放进度失败: {resume_err}')
+
+        if applied:
+            self._audio_device_pending = False
+            self._pending_audio_device_id = None
+        else:
+            info = self.get_current_audio_device_info()
+            self._audio_device_pending = True
+            self._pending_audio_device_id = self._normalize_device_id(info.get('id'))
+
+        return applied
+
 
     def _enumerate_audio_output_devices(self) -> list:
         """使用 audio_output_device_enum 枚举当前模块下的音频设备"""
@@ -792,8 +1071,12 @@ class MediaPlayerCore:
         self.available_audio_devices = result_devices
         self.device_cache_time = current_time
 
-        current_info = self.get_current_audio_device_info()
-        self.current_audio_device = current_info
+        # Ensure current audio device still exists; otherwise fall back to default
+        valid_ids = {self._normalize_device_id(dev.get('id')) for dev in result_devices}
+        current_info = self.current_audio_device if isinstance(self.current_audio_device, dict) else None
+        current_id = self._normalize_device_id(current_info.get('id')) if current_info else None
+        if current_id not in valid_ids:
+            self.current_audio_device = self._default_audio_device_entry()
 
         self.logger.info(f"发现 {len(result_devices)} 个音频设备")
         for device in result_devices:
@@ -808,129 +1091,95 @@ class MediaPlayerCore:
         return [self._default_audio_device_entry()]
 
     def set_audio_device(self, device) -> bool:
-        """
-        设置音频输出设备
-
-        Args:
-            device: 设备描述字典或设备名称/ID
-
-        Returns:
-            bool: 是否设置成功
-        """
+        """Set the preferred audio output device."""
         try:
             if not self.vlc_player:
-                self.logger.error("播放器未初始化，无法设置音频设备")
+                self.logger.error('播放器未初始化，无法设置音频设备')
                 return False
 
             self._select_audio_output_module()
-
             available_devices = self.available_audio_devices or self.get_available_audio_devices(force_refresh=True)
 
             target_entry = None
             if isinstance(device, dict):
-                target_entry = device
+                target_entry = dict(device)
             else:
                 normalized = self._normalize_device_id(device)
                 for candidate in available_devices:
-                    if normalized in (
-                        self._normalize_device_id(candidate.get('id')),
-                        self._normalize_device_id(candidate.get('name'))
-                    ):
-                        target_entry = candidate
+                    if normalized in (self._normalize_device_id(candidate.get('id')), self._normalize_device_id(candidate.get('name'))):
+                        target_entry = dict(candidate)
                         break
 
             if target_entry is None:
-                if isinstance(device, dict):
-                    display = device.get('name', '默认设备')
-                else:
-                    display = device
-                self.logger.error(f"不可用的音频设备: {display}")
+                display = device.get('name') if isinstance(device, dict) else device
+                self.logger.error(f'不可用的音频设备: {display}')
                 return False
 
-            target_id = self._normalize_device_id(target_entry.get('id'))
-            display_name = target_entry.get('name', '默认设备')
-
-            try:
-                target_value = '' if target_id is None else target_id
-                if hasattr(self.vlc_player, 'audio_output_device_set'):
-                    self.vlc_player.audio_output_device_set(None, target_value)
-                else:
-                    self.logger.error("当前VLC播放器缺少 audio_output_device_set 接口")
-                    return False
-            except Exception as e:
-                self.logger.error(f"设置音频输出设备失败: {e}")
-                return False
-
-            try:
-                current_raw = self.vlc_player.audio_output_device_get()
-            except Exception as e:
-                self.logger.debug(f"读取当前音频设备失败: {e}")
-                current_raw = None
-
-            current_id = self._normalize_device_id(current_raw)
-            if target_id is not None and current_id != target_id:
-                self.logger.warning(f"期望切换到 {display_name}，但实际为 {current_id or '默认'}")
-
-            if current_id is None:
+            if target_entry.get('is_default') or not target_entry.get('id'):
                 self.current_audio_device = self._default_audio_device_entry()
             else:
-                matched = None
-                for candidate in self.available_audio_devices:
-                    if self._normalize_device_id(candidate.get('id')) == current_id:
-                        matched = candidate
-                        break
-                if not matched:
-                    matched = {
-                        'id': current_id,
-                        'name': display_name,
-                        'description': display_name,
-                        'module': self._audio_output_module,
-                        'module_description': self._audio_output_module or '系统默认音频输出设备',
-                        'is_default': False
-                    }
-                self.current_audio_device = matched
+                self.current_audio_device = {
+                    'id': target_entry.get('id'),
+                    'name': target_entry.get('name'),
+                    'description': target_entry.get('description'),
+                    'module': target_entry.get('module'),
+                    'module_description': target_entry.get('module_description'),
+                    'is_default': False
+                }
 
-            self.logger.info(f"音频设备已设置为: {self.current_audio_device.get('name', '默认设备')}")
-            self._trigger_event('on_audio_device_changed', self.current_audio_device.get('name'))
+            applied = self._apply_audio_device(reason='user-select')
+            device_name = self.current_audio_device.get('name', '默认设备')
+            expected_id = self._normalize_device_id(self.current_audio_device.get('id'))
+            needs_restart = (
+                self.state == MediaPlayerState.PLAYING
+                and (self._audio_output_module or '').lower() in ('mmdevice', 'pulse', 'pulseaudio')
+            )
+            if applied:
+                if needs_restart:
+                    self.logger.info(f'音频设备已设置为: {device_name}（后台重启播放以生效）')
+                    self._audio_device_pending = True
+                    self._pending_audio_device_id = expected_id
+                    self._schedule_audio_device_resync(expected_id, device_name, force_restart=True)
+                    return True
 
-            return True
+                if self._verify_audio_device_selection(expected_id):
+                    self._audio_device_pending = False
+                    self._pending_audio_device_id = None
+                    self.logger.info(f'音频设备已设置为: {device_name}')
+                    self._trigger_event('on_audio_device_changed', device_name)
+                    return True
+
+                self.logger.info(f'音频设备切换正在应用: {device_name}（后台重试）')
+                self._audio_device_pending = True
+                self._pending_audio_device_id = expected_id
+                self._schedule_audio_device_resync(expected_id, device_name)
+                return True
+
+            self.logger.error(f'音频设备应用失败: {device_name}')
+            self._audio_device_pending = True
+            self._pending_audio_device_id = expected_id
+            self._schedule_audio_device_resync(expected_id, device_name, retries=2, force_restart=needs_restart)
+            return False
 
         except Exception as e:
-            self.logger.error(f"设置音频设备失败: {e}")
+            self.logger.error(f'设置音频设备失败: {e}')
+            self._audio_device_pending = True
             return False
 
     def get_current_audio_device(self) -> str:
-        """获取当前音频设备"""
         info = self.get_current_audio_device_info()
         return info.get('name', '默认设备')
 
     def get_current_audio_device_info(self) -> dict:
-        """获取当前音频设备的完整信息"""
-        if not self.vlc_player or not hasattr(self.vlc_player, 'audio_output_device_get'):
-            return self._default_audio_device_entry()
+        if isinstance(self.current_audio_device, dict):
+            info = dict(self.current_audio_device)
+            if info.get('module') is None:
+                info['module'] = self._audio_output_module
+                info['module_description'] = self._audio_output_module or '系统默认音频输出设备'
+            return info
+        return self._default_audio_device_entry()
 
-        try:
-            current_raw = self.vlc_player.audio_output_device_get()
-        except Exception as e:
-            self.logger.debug(f"读取当前音频设备信息失败: {e}")
-            current_raw = None
 
-        current_id = self._normalize_device_id(current_raw)
-        if current_id is None:
-            return self._default_audio_device_entry()
-
-        for device in self.available_audio_devices:
-            if self._normalize_device_id(device.get('id')) == current_id:
-                return dict(device)
-
-        return {
-            'id': current_id,
-            'name': current_id,
-            'description': current_id,
-            'module': self._audio_output_module,
-            'module_description': self._audio_output_module or '系统默认音频输出设备',
-            'is_default': False
-        }
 
     def refresh_audio_devices(self) -> list:
         """强制刷新音频设备列表"""

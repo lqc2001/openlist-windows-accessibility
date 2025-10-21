@@ -49,6 +49,7 @@
 5. **Shortcut parity** – Space bar and `Ctrl+Home` call the same pause/resume logic; when nothing is playing the UI just reports “no active audio”.  
 6. **VLC management** – let `MediaPlayerCore` manage instance reuse, device enumeration, and teardown; no raw VLC calls in UI.  
 7. **Error feedback** – log failures and surface them via the status bar instead of modal dialogs.
+8. **Device persistence** – cache the selected audio device and call `_apply_audio_device()` before each play/resume; the `MediaPlayerPlaying` hook re-applies the device because LibVLC rebuilds the output chain after `stop()`.
 
 ---
 
@@ -90,7 +91,8 @@
 - [ ] Space / `Ctrl+Home` only pause/resume active playback; no unintended restarts.  
 - [ ] After stopping, repeated pause/resume commands return “no audio playing”.  
 - [ ] Previous/next track updates the list selection to match the active file.  
-- [ ] Device enumeration shows real outputs (no Dummy fallback) and switching works.  
+- [ ] Device enumeration shows real outputs (no Dummy fallback); reselecting devices is applied before each playback.  
+- [ ] Stopping playback preserves the cached device and the next play/replay uses the selected output without defaulting back.  
 - [ ] Failure cases log a descriptive message and update the status bar without modal dialogs.
 
 ### 6.3 Suggested scripts
@@ -110,9 +112,9 @@ python test_audio_player.py
 - `AUDIO_PLAYER_UPDATE_SUMMARY.md` — playback change log  
 - `DOCUMENTATION_INDEX.md` — doc hub
 
-**Current version**: v1.1.1 (Audio playback control refinements)  
+**Current version**: v1.1.2 (Audio device persistence)  
 **Last update**: 21 Oct 2025  
-**Highlights**: unified pause/resume semantics, device selection improvements, list selection sync after track changes
+**Highlights**: audio device reapplied across stop/replay, pause/resume logic standardized, list selection sync after track changes
 
 ---
 
