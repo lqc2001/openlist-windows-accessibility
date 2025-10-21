@@ -213,6 +213,7 @@ class FileManagerWindow(wx.Frame):
             (wx.ACCEL_CTRL, wx.WXK_RIGHT, wx.ID_HIGHEST + 25),  # Ctrl+Right 快进
             (wx.ACCEL_CTRL, wx.WXK_UP, wx.ID_HIGHEST + 26),     # Ctrl+Up 音量增加
             (wx.ACCEL_CTRL, wx.WXK_DOWN, wx.ID_HIGHEST + 27),   # Ctrl+Down 音量减少
+            (wx.ACCEL_NORMAL, wx.WXK_SPACE, wx.ID_HIGHEST + 28),      # 空格键 - 播放/暂停
         ])
         self.SetAcceleratorTable(accel_tbl)
 
@@ -236,6 +237,7 @@ class FileManagerWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_seek_forward_hotkey, id=wx.ID_HIGHEST + 25)
         self.Bind(wx.EVT_MENU, self.on_volume_up_hotkey, id=wx.ID_HIGHEST + 26)
         self.Bind(wx.EVT_MENU, self.on_volume_down_hotkey, id=wx.ID_HIGHEST + 27)
+        self.Bind(wx.EVT_MENU, self.on_space_hotkey, id=wx.ID_HIGHEST + 28)
 
     def _bind_events(self):
         """绑定事件"""
@@ -924,39 +926,13 @@ class FileManagerWindow(wx.Frame):
     def _handle_space_key_playback(self):
         """处理空格键播放/暂停"""
         try:
-            # 获取当前选中的文件
-            selected_items = self.file_list_ctrl.get_selected_items()
-
-            if selected_items and len(selected_items) == 1:
-                file_item = selected_items[0]
-
-                # 检查是否为音频文件
-                if MediaFileDetector.is_media_file(file_item['name']):
-                    media_type = MediaFileDetector.get_media_type(file_item['name'])
-
-                    if media_type == 'audio':
-                        # 检查当前播放的文件
-                        current_filename = self.audio_controller.get_current_filename()
-
-                        if current_filename == file_item['name']:
-                            # 是同一个文件，播放/暂停
-                            self.audio_controller.play_pause()
-                        else:
-                            # 是不同的文件，播放新文件
-                            file_url = self._build_file_url(file_item)
-                            self.audio_controller.play_file(file_url, file_item['name'])
-                    else:
-                        self._update_status("选中的不是音频文件")
-                else:
-                    self._update_status("选中的不是媒体文件")
-            else:
-                # 没有选中文件或选中多个，控制当前播放
-                self.audio_controller.play_pause()
+            success = self.audio_controller.play_pause()
+            if not success:
+                self._update_status("当前没有正在播放的音频")
 
         except Exception as e:
-            self.logger.error(f"空格键播放处理失败: {e}")
+            self.logger.error(f"空格键播放控制失败: {e}")
 
-    # 播放菜单事件处理
     def on_play_pause(self, event):
         """播放/暂停菜单事件"""
         self._play_selected_or_current()
@@ -964,6 +940,10 @@ class FileManagerWindow(wx.Frame):
     def on_stop_playback(self, event):
         """停止播放菜单事件"""
         self.audio_controller.stop()
+
+    def on_space_hotkey(self, event):
+        """空格键全局播放/暂停"""
+        self._handle_space_key_playback()
 
     def on_previous_track(self, event):
         """上一个曲目菜单事件"""
@@ -997,7 +977,8 @@ class FileManagerWindow(wx.Frame):
     # 播放快捷键事件处理
     def on_play_pause_hotkey(self, event):
         """播放/暂停快捷键事件"""
-        self._play_selected_or_current()
+        if not self.audio_controller.play_pause():
+            self._update_status("当前没有正在播放的音频")
 
     def on_stop_playback_hotkey(self, event):
         """停止播放快捷键事件"""
@@ -1041,18 +1022,54 @@ class FileManagerWindow(wx.Frame):
 
                     if media_type == 'audio':
                         file_url = self._build_file_url(file_item)
-                        self.audio_controller.play_file(file_url, file_item['name'])
+                        current_url = getattr(self.audio_controller, 'current_file', None)
+                        if current_url and current_url == file_url:
+                            self.audio_controller.play_pause()
+                        else:
+                            self.audio_controller.play_file(file_url, file_item['name'])
                     else:
                         wx.MessageBox("只能播放音频文件", "提示", wx.OK | wx.ICON_INFORMATION)
                 else:
                     wx.MessageBox("选中的不是媒体文件", "提示", wx.OK | wx.ICON_INFORMATION)
             else:
                 # 没有选中文件或选中多个，控制当前播放
-                self.audio_controller.play_pause()
+                if self.audio_controller.current_file:
+                    # 控制当前播放
+                    self.audio_controller.play_pause()
+                else:
+                    # 没有播放文件，自动播放列表中的第一个音频文件
+                    first_audio = None
+                    first_index = -1
+                    for idx, item in enumerate(self.file_list):
+                        if MediaFileDetector.is_media_file(item['name']):
+                            media_type = MediaFileDetector.get_media_type(item['name'])
+                            if media_type == 'audio':
+                                first_audio = item
+                                first_index = idx
+                                break
+
+                    if first_audio:
+                        file_url = self._build_file_url(first_audio)
+                        self.audio_controller.play_file(file_url, first_audio['name'])
+                        self._select_file_index(first_index)
+                    else:
+                        self._update_status("当前目录没有音频文件")
 
         except Exception as e:
             self.logger.error(f"播放操作失败: {e}")
             wx.MessageBox(f"播放操作失败: {e}", "错误", wx.OK | wx.ICON_ERROR)
+
+    def _select_file_index(self, index: int):
+        """更新文件列表的选中项"""
+        try:
+            total = self.file_list_ctrl.GetItemCount()
+            for i in range(total):
+                self.file_list_ctrl.Select(i, on=(i == index))
+            if 0 <= index < total:
+                self.file_list_ctrl.Focus(index)
+                self.file_list_ctrl.EnsureVisible(index)
+        except Exception as e:
+            self.logger.debug(f"更新文件列表选中项失败: {e}")
 
     def _play_previous_audio(self):
         """播放上一个音频文件"""
@@ -1085,16 +1102,19 @@ class FileManagerWindow(wx.Frame):
                 prev_index, prev_file = audio_files[current_index - 1]
                 file_url = self._build_file_url(prev_file)
                 self.audio_controller.play_file(file_url, prev_file['name'])
+                self._select_file_index(prev_index)
             elif current_index == 0:
                 # 已经是第一个，播放最后一个
                 last_index, last_file = audio_files[-1]
                 file_url = self._build_file_url(last_file)
                 self.audio_controller.play_file(file_url, last_file['name'])
+                self._select_file_index(last_index)
             else:
                 # 没找到当前文件，播放第一个
                 first_index, first_file = audio_files[0]
                 file_url = self._build_file_url(first_file)
                 self.audio_controller.play_file(file_url, first_file['name'])
+                self._select_file_index(first_index)
 
         except Exception as e:
             self.logger.error(f"播放上一个音频文件失败: {e}")
@@ -1130,16 +1150,19 @@ class FileManagerWindow(wx.Frame):
                 next_index, next_file = audio_files[current_index + 1]
                 file_url = self._build_file_url(next_file)
                 self.audio_controller.play_file(file_url, next_file['name'])
+                self._select_file_index(next_index)
             elif current_index == len(audio_files) - 1:
                 # 已经是最后一个，播放第一个
                 first_index, first_file = audio_files[0]
                 file_url = self._build_file_url(first_file)
                 self.audio_controller.play_file(file_url, first_file['name'])
+                self._select_file_index(first_index)
             else:
                 # 没找到当前文件，播放第一个
                 first_index, first_file = audio_files[0]
                 file_url = self._build_file_url(first_file)
                 self.audio_controller.play_file(file_url, first_file['name'])
+                self._select_file_index(first_index)
 
         except Exception as e:
             self.logger.error(f"播放下一个音频文件失败: {e}")
@@ -1147,12 +1170,13 @@ class FileManagerWindow(wx.Frame):
     def _play_first_audio_file(self):
         """播放第一个音频文件"""
         try:
-            for file_item in self.file_list:
+            for index, file_item in enumerate(self.file_list):
                 if MediaFileDetector.is_media_file(file_item['name']):
                     media_type = MediaFileDetector.get_media_type(file_item['name'])
                     if media_type == 'audio':
                         file_url = self._build_file_url(file_item)
                         self.audio_controller.play_file(file_url, file_item['name'])
+                        self._select_file_index(index)
                         return
 
             self._update_status("当前目录没有音频文件")

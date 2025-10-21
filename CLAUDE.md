@@ -1,200 +1,125 @@
-# OpenList Windows管理工具 - Claude Code 配置
+# OpenList Windows Management Tool – Developer Guide (Claude Edition)
 
-## 项目概述
+> Keep the codebase accessibility-first while refining the audio experience. This guide summarizes coding standards, shortcut contracts, and regression checks. Treat it as the living reference before shipping changes.
 
-这是一个基于wxPython开发的OpenList服务器Windows管理工具，专为视障用户设计，提供完整无障碍支持。
+---
 
-## 开发指导原则
+## 1. Project Overview
+- **Tech stack**: wxPython, requests, python-vlc  
+- **Focus**: Screen-reader friendly UI, full keyboard navigation, integrated audio playback with device selection  
+- **Directory layout**
+  ```text
+  src/
+    ui/               # windowing & interaction
+    media/            # VLC wrapper and playback control
+    core/             # logging, configuration, utilities
+    api/              # OpenList API client
+    accessibility/    # light-weight accessibility helpers
+  ```
 
-### 无障碍设计原则
-- **简单但有效**：避免过度复杂的自定义无障碍实现
-- **原生支持优先**：使用wxPython内置的无障碍功能
-- **键盘导航完整性**：确保所有功能都可以通过键盘操作
-- **屏幕阅读器兼容**：与NVDA等主流屏幕阅读器兼容
+---
 
-### Tab导航最佳实践
-1. **使用Panel作为控件容器**：确保Tab导航稳定
-2. **保持控件启用状态**：即使功能受限也要保持Tab可访问
-3. **避免Tab快捷键冲突**：不在菜单中使用Tab快捷键
-4. **简单的线性布局**：按Tab顺序添加控件
+## 2. Accessibility & Interaction Guidelines
+### 2.1 Principles
+- **Native first** – rely on wxPython’s built-in accessibility facilities.  
+- **Keyboard reachable** – every feature must expose a keyboard path (Tab order or shortcut).  
+- **Clear naming** – call `SetName` and `SetHelpText` for every interactive control to describe function and shortcut.  
+- **Screen reader parity** – periodically test with NVDA/Narrator to verify announcement order.
 
-## 代码规范
+### 2.2 Layout & Tab Flow
+1. Embed groups of controls within `wx.Panel` instances.  
+2. Keep the creation order in line with logical Tab navigation; avoid manual Tab-index tweaks.  
+3. Split complex areas into multiple panels to maintain predictable focus moves.
 
-### 文件结构规范
-```
-src/
-├── ui/           # 用户界面模块
-├── core/         # 核心功能模块
-├── api/          # API客户端模块
-├── media/        # 媒体播放模块
-└── accessibility/ # 无障碍功能模块（简化版）
-```
+### 2.3 Do / Don’t
+| ✅ Do | ❌ Don’t |
+| --- | --- |
+| Use wxPython native accessibility | Build custom accessibility frameworks |
+| Keep controls enabled for Tab navigation | Trap or override Tab key handling |
+| Provide concise, descriptive captions | Add chatty or flashy voice prompts |
+| Use `Alt+letter`, `Ctrl+combo` accelerators | Bind Tab shortcuts in menus |
 
-### 命名规范
-- **类名**：PascalCase（如 `MainFrame`）
-- **函数名**：snake_case（如 `create_ui`）
-- **变量名**：snake_case（如 `server_combo`）
-- **常量名**：UPPER_SNAKE_CASE
+---
 
-### 无障碍属性设置
-```python
-# 控件名称设置
-control.SetName("简洁明确的名称")
+## 3. Audio Playback Implementation Notes
+1. **File detection** – always use `MediaFileDetector` to identify playable items.  
+2. **Single controller** – UI code should speak only to `AudioPlayerController`.  
+3. **State sync** – update status bar, selected list item, and controller state together (`_select_file_index` is the helper).  
+4. **Pause semantics** – `AudioPlayerController.play_pause()` returns `False` when nothing is playing/paused; never reload media inside that method.  
+5. **Shortcut parity** – Space bar and `Ctrl+Home` call the same pause/resume logic; when nothing is playing the UI just reports “no active audio”.  
+6. **VLC management** – let `MediaPlayerCore` manage instance reuse, device enumeration, and teardown; no raw VLC calls in UI.  
+7. **Error feedback** – log failures and surface them via the status bar instead of modal dialogs.
 
-# 帮助文本设置
-control.SetHelpText("详细的功能描述，包含快捷键信息")
+---
 
-# 示例
-self.connect_btn = wx.Button(panel, label="连接(&L)")
-self.connect_btn.SetName("连接按钮")
-self.connect_btn.SetHelpText("连接到选中的OpenList服务器 (Alt+L)")
-```
+## 4. Shortcut Contracts
+### 4.1 General
+- `Alt+letter` — primary actions in menus/dialogs  
+- `Ctrl+Tab` — switch panes  
+- `Alt+F4` — exit  
+- `F1` — help
 
-## 常见任务模式
+### 4.2 Audio Playback (global)
+- `Ctrl+Home` — pause/resume, only when audio is currently playing or paused  
+- `Ctrl+End` — stop playback and clear the active file reference  
+- `Ctrl+PageUp / PageDown` — previous / next track  
+- `Ctrl+Left / Right` — seek backward / forward  
+- `Ctrl+Up / Down` — volume up / down  
+- `Space` — identical to `Ctrl+Home`; works regardless of focus location  
+- **Fallback behavior**: if neither playing nor paused, the shortcut simply updates the status bar with “no audio playing” (no implicit load).
 
-### 添加新功能
-1. 首先考虑无障碍影响
-2. 确保支持键盘导航
-3. 添加适当的SetName和SetHelpText
-4. 测试屏幕阅读器兼容性
+---
 
-### 修复Bug
-1. 优先检查无障碍相关代码
-2. 测试Tab导航是否正常
-3. 验证快捷键功能
-4. 确保错误信息对屏幕阅读器友好
+## 5. Coding Standards
+- Class names use **PascalCase**; functions & variables use **snake_case**; constants use **UPPER_SNAKE_CASE**.  
+- Every non-trivial method should include a short docstring with intent and caveats.  
+- Logging goes through `get_logger()`; never use `print`.  
+- API interaction funnels through `OpenListClient`; avoid stray `requests` calls.
 
-### 优化性能
-1. 避免阻塞主线程
-2. 合理使用异步操作
-3. 注意内存泄漏
-4. 保持界面响应性
+---
 
-### 音频播放功能开发
-1. **媒体检测**：使用MediaFileDetector检测文件类型
-2. **播放器集成**：优先使用AudioPlayerController进行集成播放
-3. **状态管理**：确保播放状态与UI实时同步
-4. **资源管理**：正确初始化和清理VLC资源
-5. **错误处理**：完善VLC库加载和播放错误处理
-6. **无障碍支持**：确保所有播放功能都有键盘访问支持
+## 6. Regression Checklist (run before commit)
+### 6.1 Core UX
+- [ ] Application launches without errors.  
+- [ ] Tab navigation covers all controls in logical order.  
+- [ ] Screen reader announces names/help texts correctly.  
+- [ ] Menu items and buttons include shortcut hints.
 
-## 禁止的操作
+### 6.2 Audio Playback
+- [ ] Play, pause, and stop update the status bar and current track name.  
+- [ ] Space / `Ctrl+Home` only pause/resume active playback; no unintended restarts.  
+- [ ] After stopping, repeated pause/resume commands return “no audio playing”.  
+- [ ] Previous/next track updates the list selection to match the active file.  
+- [ ] Device enumeration shows real outputs (no Dummy fallback) and switching works.  
+- [ ] Failure cases log a descriptive message and update the status bar without modal dialogs.
 
-### ❌ 不要做的事情
-- 不要实现复杂的自定义无障碍类
-- 不要手动控制Tab顺序
-- 不要拦截Tab键事件
-- 不要创建复杂的语音反馈系统
-- 不要在菜单中使用Tab快捷键
-
-### ✅ 推荐的做法
-- 使用wxPython原生无障碍支持
-- 保持控件启用状态支持Tab导航
-- 简洁的控件命名和描述
-- 标准的键盘快捷键实现
-
-## 测试要求
-
-### 必须测试的功能
-- [ ] 程序正常启动
-- [ ] Tab导航在所有控件间正常工作
-- [ ] 所有快捷键正常响应
-- [ ] 按钮文本包含快捷键提示
-- [ ] 屏幕阅读器能正确朗读控件信息
-
-### 音频播放功能测试
-- [ ] 音频播放控制器初始化成功
-- [ ] 播放菜单系统正常工作
-- [ ] 播放快捷键响应正确
-- [ ] 状态栏显示播放信息准确
-- [ ] 空格键播放/暂停功能正常
-- [ ] 音频设备切换功能正常
-- [ ] 倍速播放功能正常
-- [ ] 播放列表导航正常
-- [ ] VLC库加载和错误处理正常
-
-### 测试工具
+### 6.3 Suggested scripts
 ```bash
-# 启动测试
 python test_startup.py
-
-# Tab导航测试
 python test_tab_navigation.py
-
-# 无障碍功能测试
 python test_accessibility.py
-
-# 音频播放功能测试
-python test_audio_player_integration.py
+python test_audio_player.py
 ```
 
-## 文档维护
+---
 
-### 更新文档时
-1. 重大功能更新：更新README.md
-2. 详细功能说明：更新HELP_DOCUMENTATION.md
-3. 开发指南更新：更新CLAUDE.md
-4. 删除过时的单独报告文档
+## 7. Documentation Map
+- `README.md` — user quick start  
+- `HELP_DOCUMENTATION.md` — full user manual  
+- `CLAUDE.md` — (this document) engineering conventions  
+- `AUDIO_PLAYER_UPDATE_SUMMARY.md` — playback change log  
+- `DOCUMENTATION_INDEX.md` — doc hub
 
-### 文档结构
-- `README.md` - 用户快速开始指南
-- `HELP_DOCUMENTATION.md` - 完整用户帮助文档
-- `CLAUDE.md` - 开发团队配置和指南
-- `AUDIO_PLAYER_UPDATE_SUMMARY.md` - 音频播放功能更新总结
-- `VERSION_UPDATE_v1.1.0.md` - v1.1.0版本更新记录
-- `DOCUMENTATION_INDEX.md` - 文档索引
-
-## 项目特定配置
-
-### 快捷键约定
-- `Alt+字母`：主要功能快捷键
-- `F1`：帮助信息
-- `Ctrl+Tab`：切换功能
-- `Alt+F4`：退出程序
-
-### 音频播放快捷键约定
-- `Ctrl+Home`：播放/暂停音频
-- `Ctrl+End`：停止播放
-- `Ctrl+PageUp/PageDown`：上一个/下一个曲目
-- `Ctrl+Left/Right`：快退/快进
-- `Ctrl+Up/Down`：音量控制
-- `空格键`：播放/暂停（文件列表焦点时）
-
-### 界面布局约定
-- 使用Panel作为主要容器
-- 简洁的线性布局
-- 一致的间距和对齐
-- 清晰的视觉层次
-
-### 错误处理约定
-- 使用标准的wx.MessageBox
-- 提供清晰的错误信息
-- 包含解决建议
-- 不使用复杂的错误对话框
-
-## 联系和协作
-
-### 代码审查要点
-1. 无障碍功能是否完整
-2. Tab导航是否正常
-3. 快捷键是否冲突
-4. 代码是否符合项目规范
-
-### 问题报告模板
-- 问题描述
-- 重现步骤
-- 期望行为
-- 实际行为
-- 环境信息（操作系统、屏幕阅读器等）
+**Current version**: v1.1.1 (Audio playback control refinements)  
+**Last update**: 21 Oct 2025  
+**Highlights**: unified pause/resume semantics, device selection improvements, list selection sync after track changes
 
 ---
 
-## 版本信息
+## 8. Code Review Focus
+1. Accessibility unchanged or improved (focus order, announcements, shortcuts).  
+2. Audio controller state and UI state stay aligned; no hidden reloads.  
+3. Logging/status messaging is informative yet non-intrusive.  
+4. New shortcuts or behaviors are documented here before merge.
 
-**当前版本**：v1.1.0 (音频播放功能版)
-**最后更新**：2025年10月17日
-**主要更新**：新增音频播放功能、媒体播放模块、播放控制快捷键等
-
----
-
-*此文档由开发团队维护，记录项目特定的开发规范和约定。*
+When proposing a new convention or shortcut, update this guide in the same pull request. Thanks!
