@@ -476,24 +476,20 @@ class AudioPlayerController:
                         self.parent_window._update_status(f"音频设备已切换到: {device_name}")
                     except Exception as status_err:
                         self.logger.debug(f"更新状态栏时发生异常: {status_err}")
-                wx.MessageBox(
-                    f"已切换到: {device_name}",
-                    "音频设备",
-                    wx.OK | wx.ICON_INFORMATION
-                )
             else:
-                wx.MessageBox(
-                    f"切换音频设备失败: {device_name}",
-                    "错误",
-                    wx.OK | wx.ICON_ERROR
-                )
+                self.logger.error(f"切换音频设备失败: {device_name}")
+                if hasattr(self.parent_window, "_update_status"):
+                    try:
+                        self.parent_window._update_status(f"切换音频设备失败: {device_name}")
+                    except Exception as status_err:
+                        self.logger.debug(f"更新状态栏时发生异常: {status_err}")
         except Exception as e:
             self.logger.error(f"处理设备选择事件失败: {e}")
-            wx.MessageBox(
-                f"设备切换时发生错误: {str(e)}",
-                "错误",
-                wx.OK | wx.ICON_ERROR
-            )
+            if hasattr(self.parent_window, "_update_status"):
+                try:
+                    self.parent_window._update_status(f"设备切换时发生错误: {e}")
+                except Exception as status_err:
+                    self.logger.debug(f"更新状态栏时发生异常: {status_err}")
 
     # 状态和进度方法
     def get_current_time(self) -> int:

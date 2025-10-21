@@ -1041,7 +1041,11 @@ class FileManagerWindow(wx.Frame):
 
                     if media_type == 'audio':
                         file_url = self._build_file_url(file_item)
-                        self.audio_controller.play_file(file_url, file_item['name'])
+                        current_url = getattr(self.audio_controller, 'current_file', None)
+                        if current_url and current_url == file_url:
+                            self.audio_controller.play_pause()
+                        else:
+                            self.audio_controller.play_file(file_url, file_item['name'])
                     else:
                         wx.MessageBox("只能播放音频文件", "提示", wx.OK | wx.ICON_INFORMATION)
                 else:
