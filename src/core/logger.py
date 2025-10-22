@@ -13,7 +13,7 @@ from logging.handlers import RotatingFileHandler
 
 def setup_logger():
     """设置日志系统"""
-    # 检查环境变量是否关闭日志
+    # 检查环境变量是否开启日志（默认关闭）
     log_level = os.environ.get('OPENLIST_LOG_LEVEL', '').upper()
 
     # 创建日志记录器
@@ -22,8 +22,8 @@ def setup_logger():
     # 清除现有处理器以避免重复添加和缓存问题
     logger.handlers.clear()
 
-    if log_level == 'OFF':
-        # 创建空的日志记录器，不输出任何日志
+    if log_level != 'ON':
+        # 默认创建空的日志记录器，不输出任何日志
         logger.setLevel(logging.CRITICAL + 1)  # 设置比最高级别还高的级别，确保不输出任何日志
         # 添加空的处理器，防止日志系统警告
         logger.addHandler(logging.NullHandler())

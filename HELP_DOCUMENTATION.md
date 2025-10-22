@@ -59,20 +59,20 @@ cd openlist-windows
 # 安装依赖
 pip install -r requirements.txt
 
-# 运行程序（默认开启日志）
+# 运行程序（默认关闭日志，推荐）
 python main.py
 
-# 运行程序（关闭日志输出）
+# 运行程序（开启日志输出，用于调试）
 # Windows 命令提示符
-set OPENLIST_LOG_LEVEL=OFF
+set OPENLIST_LOG_LEVEL=ON
 python main.py
 
 # Windows PowerShell
-$env:OPENLIST_LOG_LEVEL='OFF'
+$env:OPENLIST_LOG_LEVEL='ON'
 python main.py
 
 # 或者直接设置
-OPENLIST_LOG_LEVEL=OFF python main.py
+OPENLIST_LOG_LEVEL=ON python main.py
 ```
 
 ### 测试功能
@@ -600,25 +600,25 @@ pip install -r requirements.txt
 rmdir /s config
 ```
 
-#### 2. 调试信息过多
-**问题描述**：程序运行时输出大量调试信息，影响使用体验
+#### 2. 需要调试信息
+**问题描述**：程序运行时没有输出调试信息，需要查看详细日志进行问题排查
 
 **解决方法**：
 ```bash
-# 关闭所有日志输出
+# 开启日志输出
 # Windows 命令提示符
-set OPENLIST_LOG_LEVEL=OFF
+set OPENLIST_LOG_LEVEL=ON
 python main.py
 
 # Windows PowerShell
-$env:OPENLIST_LOG_LEVEL='OFF'
+$env:OPENLIST_LOG_LEVEL='ON'
 python main.py
 ```
 
 **说明**：
-- 默认情况下程序会输出详细的调试信息，包括API请求和响应
-- 设置环境变量 `OPENLIST_LOG_LEVEL=OFF` 可以完全关闭日志输出
-- 关闭日志后程序将不再显示任何调试信息，但功能完全正常
+- 默认情况下程序不会输出任何调试信息，提供清爽的使用体验
+- 设置环境变量 `OPENLIST_LOG_LEVEL=ON` 可以开启详细日志输出
+- 开启日志后会显示详细的API请求和响应信息，便于调试和开发
 
 #### 3. Tab导航不工作
 **可能原因**：

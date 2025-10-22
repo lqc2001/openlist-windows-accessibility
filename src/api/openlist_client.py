@@ -17,7 +17,7 @@ from src.core.logger import get_logger
 
 def should_log_debug():
     """检查是否应该输出调试信息"""
-    return os.environ.get('OPENLIST_LOG_LEVEL', '').upper() != 'OFF'
+    return os.environ.get('OPENLIST_LOG_LEVEL', '').upper() == 'ON'
 
 
 class OpenListAPIError(Exception):

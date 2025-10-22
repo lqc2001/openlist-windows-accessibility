@@ -78,9 +78,10 @@
 - API interaction funnels through `OpenListClient`; avoid stray `requests` calls.
 
 ## 5.1 Logging Control
-- Set environment variable `OPENLIST_LOG_LEVEL=OFF` to disable all logging output
-- When logging is disabled, both file logs and console output (including API debug info) are suppressed
-- Default behavior maintains full logging for debugging and development
+- Set environment variable `OPENLIST_LOG_LEVEL=ON` to enable logging output
+- By default, all logging is disabled for clean user experience
+- When logging is enabled, both file logs and console debug info (including API requests/responses) are output
+- Use logging for debugging and development purposes
 
 ---
 
