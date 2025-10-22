@@ -72,10 +72,15 @@
 ---
 
 ## 5. Coding Standards
-- Class names use **PascalCase**; functions & variables use **snake_case**; constants use **UPPER_SNAKE_CASE**.  
-- Every non-trivial method should include a short docstring with intent and caveats.  
-- Logging goes through `get_logger()`; never use `print`.  
+- Class names use **PascalCase**; functions & variables use **snake_case**; constants use **UPPER_SNAKE_CASE**.
+- Every non-trivial method should include a short docstring with intent and caveats.
+- Logging goes through `get_logger()`; never use `print`.
 - API interaction funnels through `OpenListClient`; avoid stray `requests` calls.
+
+## 5.1 Logging Control
+- Set environment variable `OPENLIST_LOG_LEVEL=OFF` to disable all logging output
+- When logging is disabled, both file logs and console output (including API debug info) are suppressed
+- Default behavior maintains full logging for debugging and development
 
 ---
 

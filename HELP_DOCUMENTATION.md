@@ -59,8 +59,20 @@ cd openlist-windows
 # 安装依赖
 pip install -r requirements.txt
 
-# 运行程序
+# 运行程序（默认开启日志）
 python main.py
+
+# 运行程序（关闭日志输出）
+# Windows 命令提示符
+set OPENLIST_LOG_LEVEL=OFF
+python main.py
+
+# Windows PowerShell
+$env:OPENLIST_LOG_LEVEL='OFF'
+python main.py
+
+# 或者直接设置
+OPENLIST_LOG_LEVEL=OFF python main.py
 ```
 
 ### 测试功能
@@ -588,7 +600,27 @@ pip install -r requirements.txt
 rmdir /s config
 ```
 
-#### 2. Tab导航不工作
+#### 2. 调试信息过多
+**问题描述**：程序运行时输出大量调试信息，影响使用体验
+
+**解决方法**：
+```bash
+# 关闭所有日志输出
+# Windows 命令提示符
+set OPENLIST_LOG_LEVEL=OFF
+python main.py
+
+# Windows PowerShell
+$env:OPENLIST_LOG_LEVEL='OFF'
+python main.py
+```
+
+**说明**：
+- 默认情况下程序会输出详细的调试信息，包括API请求和响应
+- 设置环境变量 `OPENLIST_LOG_LEVEL=OFF` 可以完全关闭日志输出
+- 关闭日志后程序将不再显示任何调试信息，但功能完全正常
+
+#### 3. Tab导航不工作
 **可能原因**：
 - 系统快捷键冲突
 - 屏幕阅读器干扰
@@ -599,7 +631,7 @@ rmdir /s config
 - 检查系统快捷键设置
 - 尝试不同的屏幕阅读器设置
 
-#### 3. 连接服务器失败
+#### 5. 连接服务器失败
 **可能原因**：
 - 服务器地址错误
 - 网络连接问题
@@ -610,7 +642,7 @@ rmdir /s config
 - 检查网络连接
 - 尝试忽略SSL证书错误
 
-#### 4. 密码保存失败
+#### 6. 密码保存失败
 **可能原因**：
 - 配置目录权限问题
 - 磁盘空间不足
