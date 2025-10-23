@@ -77,6 +77,7 @@
 7. **Error feedback** – log failures and surface them via the status bar instead of modal dialogs.
 8. **Device persistence** – cache the selected audio device and call `_apply_audio_device()` before each play/resume; the `MediaPlayerPlaying` hook re-applies the device because LibVLC rebuilds the output chain after `stop()`.
 9. **Navigation Independence** – directory navigation does not interrupt active audio playback.
+10. **Status Bar Dedication** – the status bar is exclusively dedicated to audio playback functionality with 5 fields: playback status, time progress, percentage, volume/device, and playback rate. No non-audio information should be displayed in the status bar.
 
 ---
 
@@ -99,7 +100,7 @@
 - `Ctrl+Left / Right` — seek backward / forward  
 - `Ctrl+Up / Down` — volume up / down  
 - `Space` — identical to `Ctrl+Home`; works regardless of focus location  
-- **Fallback behavior**: if neither playing nor paused, the shortcut simply updates the status bar with “no audio playing” (no implicit load).
+- **Fallback behavior**: if neither playing nor paused, the shortcut simply logs "no audio playing" (no implicit load). Status bar is managed exclusively by AudioPlayerController.
 
 ---
 
@@ -141,13 +142,15 @@
 - [ ] Directory switching doesn't interrupt audio playback.
 
 ### 7.3 Audio Playback
-- [ ] Play, pause, and stop update the status bar and current track name.  
-- [ ] Space / `Ctrl+Home` only pause/resume active playback; no unintended restarts.  
-- [ ] After stopping, repeated pause/resume commands return “no audio playing”.  
-- [ ] Previous/next track updates the list selection to match the active file.  
-- [ ] Device enumeration shows real outputs (no Dummy fallback); reselecting devices is applied before each playback.  
-- [ ] Stopping playback preserves the cached device and the next play/replay uses the selected output without defaulting back.  
+- [ ] Play, pause, and stop update the status bar and current track name.
+- [ ] Space / `Ctrl+Home` only pause/resume active playback; no unintended restarts.
+- [ ] After stopping, repeated pause/resume commands return "no audio playing".
+- [ ] Previous/next track updates the list selection to match the active file.
+- [ ] Device enumeration shows real outputs (no Dummy fallback); reselecting devices is applied before each playback.
+- [ ] Stopping playback preserves the cached device and the next play/replay uses the selected output without defaulting back.
 - [ ] Failure cases log a descriptive message and update the status bar without modal dialogs.
+- [ ] Status bar displays only audio-related information: playback status, time, progress, volume/device, and playback rate.
+- [ ] Non-audio operations (file loading, navigation, connection status) only log to console, never display in status bar.
 
 ### 7.4 Suggested scripts
 ```bash
@@ -178,9 +181,9 @@ python demo_logger_switch.py    # Test logging system behavior
 - `CLAUDE.md` — (this document) engineering conventions
 - `AUDIO_PLAYER_UPDATE_SUMMARY.md` — playback change log
 
-**Current version**: v1.1.4 (Smart directory navigation with position memory)
+**Current version**: v1.1.5 (Status bar optimization for audio-only display)
 **Last update**: 23 Oct 2025
-**Highlights**: intelligent navigation history, auto-select first item, focus management, security improvements
+**Highlights**: status bar dedicated exclusively to audio playback functionality, removed all non-audio status display
 
 ---
 

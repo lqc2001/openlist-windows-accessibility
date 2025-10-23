@@ -140,12 +140,12 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_SHOW, self.on_show)
 
     def _create_status_bar(self):
-        """创建状态栏"""
-        # 创建5字段状态栏，所有字段宽度-1（自动调整）
+        """创建状态栏 - 仅用于音频播放相关功能"""
+        # 创建5字段状态栏，专门用于音频播放状态显示
         self.status_bar = self.CreateStatusBar(5)
         self.status_bar.SetStatusWidths([-1, -1, -1, -1, -1])
 
-        # 设置初始状态栏文本
+        # 设置初始状态栏文本 - 仅音频相关字段
         self.status_bar.SetStatusText("停止", 0)      # 播放状态
         self.status_bar.SetStatusText("00:00/00:00", 1)  # 播放时间
         self.status_bar.SetStatusText("0%", 2)       # 进度百分比

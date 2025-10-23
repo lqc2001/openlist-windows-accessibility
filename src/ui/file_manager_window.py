@@ -72,11 +72,11 @@ class FileManagerWindow(wx.Frame):
 
         main_sizer.Add(self.file_list_ctrl, 1, wx.ALL | wx.EXPAND, 10)
 
-        # 状态栏（5字段用于音频播放显示）
+        # 状态栏（5字段专门用于音频播放显示）
         self.status_bar = self.CreateStatusBar(5)
         self.status_bar.SetStatusWidths([-2, -1, -1, -1, -1])  # 自适应宽度
         self.audio_controller.set_status_bar(self.status_bar)
-        self._update_status("已连接到服务器")
+        # 注意：状态栏现在只用于音频功能，不再显示连接状态等非音频信息
 
         self.SetSizer(main_sizer)
 
@@ -263,7 +263,7 @@ class FileManagerWindow(wx.Frame):
         load_id = self._load_sequence
         target_path = self.current_path
 
-        self._update_status("正在加载文件列表...")
+        self.logger.info("正在加载文件列表...")  # 只记录日志，不更新状态栏
 
         worker = threading.Thread(
             target=self._load_file_list_worker,
@@ -321,14 +321,14 @@ class FileManagerWindow(wx.Frame):
 
         if error is not None:
             message = f"加载文件列表失败: {error}"
-            self._update_status(message)
+            self.logger.info(message)  # 只记录日志，不更新状态栏
             # 保持之前的选择状态，不清空列表
             # 这样可以保留用户当前的选择，避免意外丢失焦点
             return
 
         self.file_list = files
         self.file_list_ctrl.load_files(files)
-        self._update_status(f"已加载 {len(files)} 个项目，总计 {total} 个")
+        self.logger.info(f"已加载 {len(files)} 个项目，总计 {total} 个")  # 只记录日志
 
         # 自动选择第一项（新目录加载完成时）
         self._auto_select_first_item()
@@ -395,9 +395,9 @@ class FileManagerWindow(wx.Frame):
         return type_mapping.get(mime_type, 'default')
 
     def _update_status(self, message):
-        """更新状态栏"""
-        self.status_bar.SetStatusText(message)
+        """更新状态 - 仅记录日志，状态栏只用于音频信息"""
         self.logger.info(f"状态更新: {message}")
+        # 注意：状态栏现在专门用于音频播放显示，不再显示其他状态信息
 
     def on_item_activated(self, event):
         """文件项双击事件"""
@@ -557,7 +557,7 @@ class FileManagerWindow(wx.Frame):
             else:
                 # 已经在根目录，显示提示
                 self.logger.info("已经在根目录")
-                self._update_status("已经在根目录")
+                # 不再更新状态栏，状态栏仅用于音频信息
 
         except Exception as e:
             self.logger.error(f"返回上级目录失败: {e}")
@@ -604,7 +604,7 @@ class FileManagerWindow(wx.Frame):
                 self.file_list_ctrl.SetFocus()
                 self.logger.debug(f"从历史栈恢复目录状态: {expected_path}, 无选中项")
 
-            self._update_status(f"已恢复 {len(top_entry['files'])} 个项目")
+            self.logger.info(f"已恢复 {len(top_entry['files'])} 个项目")
             self._navigation_history.pop()  # 移除已使用的条目
             return True
         else:
@@ -647,7 +647,7 @@ class FileManagerWindow(wx.Frame):
         """播放媒体文件"""
         try:
             self.logger.info(f"开始播放媒体文件: {file_item['name']}")
-            self._update_status(f"正在打开播放器: {file_item['name']}")
+            # 不再更新状态栏，状态栏仅用于音频播放器控制器
 
             # 构建文件URL（用于播放器）
             file_url = self._build_file_url(file_item)
@@ -662,11 +662,11 @@ class FileManagerWindow(wx.Frame):
                 self.media_player_window.Show()
                 self.media_player_window.Raise()
 
-            self._update_status(f"播放器已打开: {file_item['name']}")
+            # 不再更新状态栏，状态栏仅用于音频播放器控制器
 
         except Exception as e:
             self.logger.error(f"播放媒体文件失败: {e}")
-            self._update_status(f"播放失败: {file_item['name']} - {e}")
+            # 不再更新状态栏，状态栏仅用于音频播放器控制器
             wx.MessageBox(f"播放媒体文件失败: {e}", "播放错误", wx.OK | wx.ICON_ERROR)
 
     def _build_file_url(self, file_item):
@@ -990,8 +990,8 @@ class FileManagerWindow(wx.Frame):
             self.logger.info(f"在浏览器中打开: {encoded_url}")
             webbrowser.open(encoded_url)
 
-            # 更新状态栏而不显示弹窗
-            self._update_status(f"已在浏览器中打开: {file_item['name']}")
+            # 不再更新状态栏，状态栏仅用于音频信息
+            self.logger.info(f"已在浏览器中打开: {file_item['name']}")
 
         except Exception as e:
             self.logger.error(f"网页打开失败: {e}")
@@ -1061,7 +1061,8 @@ class FileManagerWindow(wx.Frame):
         try:
             success = self.audio_controller.play_pause()
             if not success:
-                self._update_status("当前没有正在播放的音频")
+                # 只记录日志，不更新状态栏（状态栏由音频控制器自动更新）
+                self.logger.info("当前没有正在播放的音频")
 
         except Exception as e:
             self.logger.error(f"空格键播放控制失败: {e}")
@@ -1105,13 +1106,15 @@ class FileManagerWindow(wx.Frame):
     def on_set_playback_rate(self, rate):
         """设置播放倍速事件"""
         self.audio_controller.set_playback_rate(rate)
-        self._update_status(f"播放倍速已设置为: {rate}x")
+        # 不再更新状态栏，状态栏由音频控制器自动更新
+        self.logger.info(f"播放倍速已设置为: {rate}x")
 
     # 播放快捷键事件处理
     def on_play_pause_hotkey(self, event):
         """播放/暂停快捷键事件"""
         if not self.audio_controller.play_pause():
-            self._update_status("当前没有正在播放的音频")
+            # 只记录日志，不更新状态栏（状态栏由音频控制器自动更新）
+            self.logger.info("当前没有正在播放的音频")
 
     def on_stop_playback_hotkey(self, event):
         """停止播放快捷键事件"""
@@ -1186,7 +1189,7 @@ class FileManagerWindow(wx.Frame):
                         self.audio_controller.play_file(file_url, first_audio['name'])
                         self._select_file_index(first_index)
                     else:
-                        self._update_status("当前目录没有音频文件")
+                        self.logger.info("当前目录没有音频文件")
 
         except Exception as e:
             self.logger.error(f"播放操作失败: {e}")
@@ -1216,7 +1219,7 @@ class FileManagerWindow(wx.Frame):
                             current_index = len(audio_files) - 1
 
             if not audio_files:
-                self._update_status("当前目录没有音频文件")
+                self.logger.info("当前目录没有音频文件")
                 return
 
             if current_index > 0:
@@ -1264,7 +1267,7 @@ class FileManagerWindow(wx.Frame):
                             current_index = len(audio_files) - 1
 
             if not audio_files:
-                self._update_status("当前目录没有音频文件")
+                self.logger.info("当前目录没有音频文件")
                 return
 
             if current_index >= 0 and current_index < len(audio_files) - 1:
@@ -1318,7 +1321,7 @@ class FileManagerWindow(wx.Frame):
                     self.logger.info(f"使用音频控制器播放: {file_item['name']}")
                     file_url = self._build_file_url(file_item)
                     self.audio_controller.play_file(file_url, file_item['name'])
-                    self._update_status(f"正在播放: {file_item['name']}")
+                    # 不再更新状态栏，状态栏由音频控制器自动更新
                 else:
                     # 视频文件使用原来的播放器窗口
                     self.logger.info(f"使用视频播放器播放: {file_item['name']}")
@@ -1334,7 +1337,7 @@ class FileManagerWindow(wx.Frame):
         """播放视频文件（使用原来的播放器窗口）"""
         try:
             self.logger.info(f"开始播放视频文件: {file_item['name']}")
-            self._update_status(f"正在打开视频播放器: {file_item['name']}")
+            # 不再更新状态栏，状态栏仅用于音频播放器控制器
 
             # 构建文件URL
             file_url = self._build_file_url(file_item)
@@ -1348,11 +1351,11 @@ class FileManagerWindow(wx.Frame):
                 self.media_player_window.Show()
                 self.media_player_window.Raise()
 
-            self._update_status(f"视频播放器已打开: {file_item['name']}")
+            # 不再更新状态栏，状态栏仅用于音频播放器控制器
 
         except Exception as e:
             self.logger.error(f"播放视频文件失败: {e}")
-            self._update_status(f"视频播放失败: {file_item['name']} - {e}")
+            # 不再更新状态栏，状态栏仅用于音频播放器控制器
             wx.MessageBox(f"播放视频文件失败: {e}", "播放错误", wx.OK | wx.ICON_ERROR)
 
 

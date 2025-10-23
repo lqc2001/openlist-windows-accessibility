@@ -527,7 +527,7 @@ class AudioPlayerController:
         return self.audio_player.get_time_string(time_ms)
 
     def _update_status_bar(self):
-        """更新状态栏显示"""
+        """更新状态栏显示 - 仅显示音频播放相关信息"""
         if not hasattr(self, 'status_bar') or not self.status_bar:
             return
 
@@ -556,12 +556,12 @@ class AudioPlayerController:
             # 倍速
             speed_text = f"{self.playback_rate}x"
 
-            # 更新状态栏
-            self.status_bar.SetStatusText(status_text, self.status_field)
-            self.status_bar.SetStatusText(time_text, self.time_field)
-            self.status_bar.SetStatusText(progress_text, self.progress_field)
-            self.status_bar.SetStatusText(volume_text, self.volume_field)
-            self.status_bar.SetStatusText(speed_text, self.speed_field)
+            # 更新状态栏 - 5个字段全部用于音频播放功能
+            self.status_bar.SetStatusText(status_text, self.status_field)     # 播放状态
+            self.status_bar.SetStatusText(time_text, self.time_field)         # 播放时间
+            self.status_bar.SetStatusText(progress_text, self.progress_field) # 播放进度
+            self.status_bar.SetStatusText(volume_text, self.volume_field)     # 音量和设备
+            self.status_bar.SetStatusText(speed_text, self.speed_field)       # 播放倍速
 
         except Exception as e:
             self.logger.error(f"更新状态栏失败: {e}")
