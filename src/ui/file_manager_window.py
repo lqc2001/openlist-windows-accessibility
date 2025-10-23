@@ -5,6 +5,8 @@
 登录成功后显示的文件管理界面
 """
 
+import threading
+
 import wx
 import wx.lib.mixins.listctrl as listmix
 from src.core.logger import get_logger
@@ -38,6 +40,11 @@ class FileManagerWindow(wx.Frame):
         # 当前路径
         self.current_path = "/"
         self.file_list = []
+        self._load_sequence = 0
+
+        # 目录导航历史栈 (带路径验证的智能历史栈)
+        # 每个元素包含: {'path': str, 'files': list, 'selected_index': int}
+        self._navigation_history = []
 
         # 媒体播放器相关
         self.media_player_window = None
@@ -248,42 +255,83 @@ class FileManagerWindow(wx.Frame):
         # 在父窗口级别也捕获键盘事件，以确保上下文菜单键能被识别
         self.Bind(wx.EVT_KEY_DOWN, self.on_main_key_down)
 
+
+
     def _load_file_list(self):
         """加载文件列表"""
+        self._load_sequence += 1
+        load_id = self._load_sequence
+        target_path = self.current_path
+
+        self._update_status("正在加载文件列表...")
+
+        worker = threading.Thread(
+            target=self._load_file_list_worker,
+            args=(target_path, load_id),
+            daemon=True,
+        )
+        worker.start()
+
+    def _load_file_list_worker(self, path, load_id):
+        """后台线程：请求文件列表并格式化数据"""
+        files = []
+        total = 0
+        error = None
+
         try:
-            self._update_status("正在加载文件列表...")
+            response = self.client.get_file_list(path)
 
-            # 调用OpenListClient获取文件列表
-            response = self.client.get_file_list(self.current_path)
-
-            # 转换文件数据格式
-            files = []
-            for file_data in response['files']:
+            raw_files = response.get('files', [])
+            for file_data in raw_files:
                 file_item = {
                     "name": file_data.get('name', ''),
                     "size": self._format_file_size(file_data.get('size', 0)),
                     "date": self._format_date(file_data.get('modified_time')),
-                    "type": self._get_file_type(file_data.get('mime_type', ''), file_data.get('name', '')),
-                    "mime_type": file_data.get('mime_type', ''),  # 保留原始mime_type用于判断文件夹
+                    "type": self._get_file_type(
+                        file_data.get('mime_type', ''),
+                        file_data.get('name', '')
+                    ),
+                    "mime_type": file_data.get('mime_type', ''),
                     "path": file_data.get('path', ''),
-                    "sign": file_data.get('sign', ''),  # 保存签名信息
+                    "sign": file_data.get('sign', ''),
                     "id": file_data.get('id', '')
                 }
                 files.append(file_item)
 
-            self.file_list = files
-            self.file_list_ctrl.load_files(files)
+            total = response.get('total', len(files))
 
-            total = response.get('total', 0)
-            self._update_status(f"已加载 {len(files)} 个项目，总计 {total} 个")
+        except Exception as exc:
+            error = exc
+            self.logger.error(f"加载文件列表失败: {exc}")
 
-        except Exception as e:
-            self.logger.error(f"加载文件列表失败: {e}")
-            self._update_status(f"加载文件列表失败: {e}")
-            # 加载失败时显示错误，但不中断程序
-            self.file_list = []
-            self.file_list_ctrl.load_files([])
+        wx.CallAfter(
+            self._apply_file_list_result,
+            path,
+            files,
+            total,
+            error,
+            load_id
+        )
 
+    def _apply_file_list_result(self, path, files, total, error, load_id):
+        """在UI线程中应用文件列表加载结果"""
+        if load_id != self._load_sequence or path != self.current_path:
+            # 过期的加载请求，忽略结果
+            return
+
+        if error is not None:
+            message = f"加载文件列表失败: {error}"
+            self._update_status(message)
+            # 保持之前的选择状态，不清空列表
+            # 这样可以保留用户当前的选择，避免意外丢失焦点
+            return
+
+        self.file_list = files
+        self.file_list_ctrl.load_files(files)
+        self._update_status(f"已加载 {len(files)} 个项目，总计 {total} 个")
+
+        # 自动选择第一项（新目录加载完成时）
+        self._auto_select_first_item()
     def _format_file_size(self, size_bytes):
         """格式化文件大小"""
         if size_bytes == 0:
@@ -368,6 +416,9 @@ class FileManagerWindow(wx.Frame):
     def _navigate_to_folder(self, folder_item):
         """导航到文件夹"""
         try:
+            # 保存当前状态到历史栈
+            self._save_current_state_to_history()
+
             # 构建新的路径
             if self.current_path == "/":
                 new_path = f"/{folder_item['name']}"
@@ -499,8 +550,10 @@ class FileManagerWindow(wx.Frame):
                 # 更新窗口标题
                 self.SetTitle(f"文件管理 - {self.server_info.get('name')} - {new_path}")
 
-                # 重新加载文件列表
-                self._load_file_list()
+                # 尝试从历史栈恢复状态
+                if not self._try_restore_from_history(new_path):
+                    # 历史栈中没有对应状态，重新加载
+                    self._load_file_list()
             else:
                 # 已经在根目录，显示提示
                 self.logger.info("已经在根目录")
@@ -509,6 +562,86 @@ class FileManagerWindow(wx.Frame):
         except Exception as e:
             self.logger.error(f"返回上级目录失败: {e}")
             wx.MessageBox(f"返回上级目录失败: {e}", "错误", wx.OK | wx.ICON_ERROR)
+
+    def _save_current_state_to_history(self):
+        """保存当前目录状态到历史栈"""
+        if self.file_list:  # 只有当文件列表不为空时才保存
+            current_selected = self.file_list_ctrl.GetFirstSelected()
+            history_entry = {
+                'path': self.current_path,
+                'files': self.file_list.copy(),
+                'selected_index': current_selected if current_selected != -1 else 0
+            }
+            self._navigation_history.append(history_entry)
+            self.logger.debug(f"已保存目录状态到历史栈: {self.current_path}, 选中项: {history_entry['selected_index']}")
+
+    def _try_restore_from_history(self, expected_path):
+        """尝试从历史栈恢复目录状态
+
+        Args:
+            expected_path: 期望恢复的路径
+
+        Returns:
+            bool: 是否成功恢复
+        """
+        if not self._navigation_history:
+            self.logger.debug("历史栈为空，无法恢复")
+            return False
+
+        # 检查栈顶是否匹配期望的路径
+        top_entry = self._navigation_history[-1]
+        if top_entry['path'] == expected_path:
+            # 恢复状态
+            self.file_list = top_entry['files']
+            self.file_list_ctrl.load_files(top_entry['files'])
+
+            # 恢复选中状态
+            if top_entry['files'] and 0 <= top_entry['selected_index'] < len(top_entry['files']):
+                self._select_file_index(top_entry['selected_index'])
+                self.logger.debug(f"从历史栈恢复目录状态: {expected_path}, 选中项: {top_entry['selected_index']}")
+            else:
+                # 如果文件列表为空或索引无效，设置焦点到列表但不选中任何项
+                self.file_list_ctrl.SetFocus()
+                self.logger.debug(f"从历史栈恢复目录状态: {expected_path}, 无选中项")
+
+            self._update_status(f"已恢复 {len(top_entry['files'])} 个项目")
+            self._navigation_history.pop()  # 移除已使用的条目
+            return True
+        else:
+            # 路径不匹配，历史栈不可用
+            self.logger.debug(f"历史栈路径不匹配: 期望 {expected_path}, 实际 {top_entry['path']}")
+            # 清空历史栈，因为状态不一致
+            self._navigation_history.clear()
+            return False
+
+    def _select_file_index(self, index: int):
+        """更新文件列表的选中项并设置焦点"""
+        try:
+            total = self.file_list_ctrl.GetItemCount()
+            if total == 0:
+                # 空列表，只设置焦点
+                self.file_list_ctrl.SetFocus()
+                return
+
+            for i in range(total):
+                self.file_list_ctrl.Select(i, on=(i == index))
+
+            if 0 <= index < total:
+                self.file_list_ctrl.Focus(index)
+                self.file_list_ctrl.EnsureVisible(index)
+                self.logger.debug(f"已选择文件列表项: {index}")
+        except Exception as e:
+            self.logger.debug(f"更新文件列表选中项失败: {e}")
+
+    def _auto_select_first_item(self):
+        """自动选择第一项并设置焦点"""
+        if self.file_list and len(self.file_list) > 0:
+            self._select_file_index(0)
+            self.logger.debug(f"已自动选择第一项: {self.file_list[0]['name']}")
+        else:
+            # 空目录，只设置焦点到列表控件
+            self.file_list_ctrl.SetFocus()
+            self.logger.debug("空目录，只设置焦点到列表控件")
 
     def _play_media_file(self, file_item):
         """播放媒体文件"""
@@ -663,15 +796,15 @@ class FileManagerWindow(wx.Frame):
 
     def on_sort_name(self, event):
         """按名称排序"""
-        self.file_list.sort_by_name()
+        self.file_list_ctrl.sort_by_name()
 
     def on_sort_size(self, event):
         """按大小排序"""
-        self.file_list.sort_by_size()
+        self.file_list_ctrl.sort_by_size()
 
     def on_sort_date(self, event):
         """按日期排序"""
-        self.file_list.sort_by_date()
+        self.file_list_ctrl.sort_by_date()
 
     def on_about(self, event):
         """关于对话框"""
@@ -1059,18 +1192,7 @@ class FileManagerWindow(wx.Frame):
             self.logger.error(f"播放操作失败: {e}")
             wx.MessageBox(f"播放操作失败: {e}", "错误", wx.OK | wx.ICON_ERROR)
 
-    def _select_file_index(self, index: int):
-        """更新文件列表的选中项"""
-        try:
-            total = self.file_list_ctrl.GetItemCount()
-            for i in range(total):
-                self.file_list_ctrl.Select(i, on=(i == index))
-            if 0 <= index < total:
-                self.file_list_ctrl.Focus(index)
-                self.file_list_ctrl.EnsureVisible(index)
-        except Exception as e:
-            self.logger.debug(f"更新文件列表选中项失败: {e}")
-
+    
     def _play_previous_audio(self):
         """播放上一个音频文件"""
         try:
@@ -1239,7 +1361,11 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
 
     def __init__(self, parent):
         """初始化文件列表控件"""
-        wx.ListCtrl.__init__(self, parent, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        wx.ListCtrl.__init__(
+            self,
+            parent,
+            style=wx.LC_REPORT | wx.LC_SINGLE_SEL | wx.LC_VIRTUAL
+        )
         listmix.ListCtrlAutoWidthMixin.__init__(self)
 
         # 设置列
@@ -1259,18 +1385,36 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
 
     def load_files(self, files):
         """加载文件列表"""
-        self.files = files
-        self.DeleteAllItems()
-
-        for i, file_item in enumerate(files):
-            index = self.InsertItem(i, self._get_file_icon(file_item["type"]))
-            self.SetItem(index, 0, file_item["name"])
-            self.SetItem(index, 1, self._get_type_display_name(file_item["type"]))
-            self.SetItem(index, 2, file_item["size"])
-            self.SetItem(index, 3, file_item["date"])
+        self.Freeze()
+        try:
+            data = files if files is not None else []
+            self.files = data
+            count = len(self.files)
+            self.SetItemCount(count)
+            self.Refresh()
+        finally:
+            self.Thaw()
 
         # 自动调整列宽
         self._autosize_columns()
+
+    def OnGetItemText(self, item, column):
+        """虚拟列表项文本回调"""
+        if item < 0 or item >= len(self.files):
+            return ""
+
+        file_item = self.files[item]
+
+        if column == 0:
+            return file_item.get("name", "")
+        if column == 1:
+            return self._get_type_display_name(file_item.get("type", "default"))
+        if column == 2:
+            return file_item.get("size", "")
+        if column == 3:
+            return file_item.get("date", "")
+
+        return ""
 
     def _autosize_columns(self):
         """自动调整列宽"""
@@ -1321,8 +1465,12 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
 
     def select_all(self):
         """全选"""
-        for i in range(self.GetItemCount()):
-            self.Select(i, True)
+        self.Freeze()
+        try:
+            for i in range(self.GetItemCount()):
+                self.Select(i, True)
+        finally:
+            self.Thaw()
 
     
     def sort_by_name(self):
@@ -1362,8 +1510,9 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
 
     def _refresh_display(self):
         """刷新显示"""
-        self.DeleteAllItems()
-        self.load_files(self.files)
+        count = len(self.files)
+        self.SetItemCount(count)
+        self.Refresh()
 
     def on_context_menu(self, event):
         """右键菜单事件"""

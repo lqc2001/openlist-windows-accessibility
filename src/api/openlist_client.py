@@ -5,19 +5,14 @@ OpenList API客户端
 处理与OpenList服务器的HTTP通信，支持自动重试和错误处理
 """
 
+import logging
 import requests
 import json
-import os
 import time
 from urllib.parse import urljoin
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from src.core.logger import get_logger
-
-
-def should_log_debug():
-    """检查是否应该输出调试信息"""
-    return os.environ.get('OPENLIST_LOG_LEVEL', '').upper() == 'ON'
 
 
 class OpenListAPIError(Exception):
@@ -91,12 +86,11 @@ class OpenListClient:
             self.logger.error("=" * 60)
 
             # 在控制台显示警告
-            if should_log_debug():
-                print("\n" + "=" * 60)
-                print("⚠️  安全警告：SSL证书验证已禁用！")
-                print("⚠️  此设置会使您的连接容易受到中间人攻击！")
-                print("⚠️  请仅在测试环境或绝对信任的网络中使用！")
-                print("=" * 60 + "\n")
+            print("\n" + "=" * 60)
+            print("⚠️  安全警告：SSL证书验证已禁用！")
+            print("⚠️  此设置会使您的连接容易受到中间人攻击！")
+            print("⚠️  请仅在测试环境或绝对信任的网络中使用！")
+            print("=" * 60 + "\n")
 
             self.session.verify = False
             try:
@@ -141,15 +135,14 @@ class OpenListClient:
             self.logger.debug(f"请求头: {dict(self.session.headers)}")
 
             # 控制台打印请求信息（过滤敏感信息）
-            if should_log_debug():
-                print(f"\n[API请求] 方法: {method}")
-                print(f"[API请求] URL: {url}")
-                if data:
-                    filtered_data = self._filter_sensitive_data(data)
-                    print(f"[API请求] 数据: {json.dumps(filtered_data, ensure_ascii=False, indent=2)}")
-                if params:
-                    filtered_params = self._filter_sensitive_data(params)
-                    print(f"[API请求] 参数: {json.dumps(filtered_params, ensure_ascii=False, indent=2)}")
+            print(f"\n[API请求] 方法: {method}")
+            print(f"[API请求] URL: {url}")
+            if data:
+                filtered_data = self._filter_sensitive_data(data)
+                print(f"[API请求] 数据: {json.dumps(filtered_data, ensure_ascii=False, indent=2)}")
+            if params:
+                filtered_params = self._filter_sensitive_data(params)
+                print(f"[API请求] 参数: {json.dumps(filtered_params, ensure_ascii=False, indent=2)}")
 
             if method.upper() == 'GET':
                 response = self.session.get(url, params=params)
@@ -164,9 +157,8 @@ class OpenListClient:
 
             # 记录响应信息
             self.logger.debug(f"响应状态码: {response.status_code}")
-            if should_log_debug():
-                print(f"[API请求] 响应状态码: {response.status_code}")
-                print(f"[API请求] 响应头: {dict(response.headers)}")
+            print(f"[API请求] 响应状态码: {response.status_code}")
+            print(f"[API请求] 响应头: {dict(response.headers)}")
 
             # 检查响应状态
             if response.status_code == 401:
@@ -194,17 +186,23 @@ class OpenListClient:
             # 解析响应数据
             try:
                 response_data = response.json()
-                self.logger.debug(f"API响应数据: {response_data}")
+                summary = {
+                    "code": response_data.get("code"),
+                    "keys": list(response_data.keys()),
+                }
+                data_section = response_data.get("data")
+                if isinstance(data_section, dict):
+                    summary["data_keys"] = list(data_section.keys())
+                    if "content" in data_section and isinstance(data_section["content"], list):
+                        summary["data_count"] = len(data_section["content"])
+                self.logger.debug(f"API响应数据概要: {summary}")
 
-                # 控制台打印API响应信息（过滤敏感信息）
-                if should_log_debug():
-                    print(f"\n[API响应] 状态码: {response.status_code}")
-                    print(f"[API响应] 端点: {endpoint}")
-
-                    # 过滤响应中的敏感数据（如token等）
+                if self.logger.isEnabledFor(logging.DEBUG):
                     filtered_response = self._filter_sensitive_data(response_data)
-                    print(f"[API响应] 数据: {json.dumps(filtered_response, ensure_ascii=False, indent=2)}")
-
+                    self.logger.debug(
+                        "API响应详细数据: %s",
+                        json.dumps(filtered_response, ensure_ascii=False, indent=2)
+                    )
                 return response_data
             except ValueError:
                 # 检查是否是HTML响应（可能是错误页面或重定向）
@@ -213,23 +211,15 @@ class OpenListClient:
                     error_msg = f"API返回HTML页面而不是JSON (状态码: {response.status_code})"
                     self.logger.error(f"{error_msg}: {response.text[:200]}...")
 
-                    # 控制台打印HTML响应信息
-                    if should_log_debug():
-                        print(f"\n[API响应] 状态码: {response.status_code}")
-                        print(f"[API响应] 端点: {endpoint}")
-                        print(f"[API响应] 类型: HTML (非JSON)")
-                        print(f"[API响应] 内容前200字符: {response.text[:200]}")
-
                     raise OpenListAPIError(error_msg)
                 else:
                     self.logger.warning(f"API响应不是有效JSON: {response.text[:200]}...")
 
                     # 控制台打印非JSON响应信息
-                    if should_log_debug():
-                        print(f"\n[API响应] 状态码: {response.status_code}")
-                        print(f"[API响应] 端点: {endpoint}")
-                        print(f"[API响应] 类型: {content_type}")
-                        print(f"[API响应] 内容前200字符: {response.text[:200]}")
+                    print(f"\n[API响应] 状态码: {response.status_code}")
+                    print(f"[API响应] 端点: {endpoint}")
+                    print(f"[API响应] 类型: {content_type}")
+                    print(f"[API响应] 内容前200字符: {response.text[:200]}")
 
                     return response.text
 
@@ -255,14 +245,13 @@ class OpenListClient:
                 self.logger.error("3. 联系服务器管理员检查证书配置")
 
             # 控制台显示SSL错误提示
-            if should_log_debug():
-                print(f"\n❌ SSL证书验证失败: {e}")
-                if not self.ignore_ssl_errors:
-                    print("建议解决方案：")
-                    print("1. 检查服务器SSL证书是否有效")
-                    print("2. 如果是在测试环境，可以在设置中禁用SSL验证（不推荐）")
-                    print("3. 联系服务器管理员检查证书配置")
-                    print()
+            print(f"\n❌ SSL证书验证失败: {e}")
+            if not self.ignore_ssl_errors:
+                print("建议解决方案：")
+                print("1. 检查服务器SSL证书是否有效")
+                print("2. 如果是在测试环境，可以在设置中禁用SSL验证（不推荐）")
+                print("3. 联系服务器管理员检查证书配置")
+                print()
 
             raise OpenListAPIError(f"SSL证书验证失败: {e}")
 
