@@ -19,11 +19,12 @@
   ```
 
 ### 1.1 Key Features
-- **File Management**: Smart directory navigation with position memory
+- **File Management**: Smart directory navigation with position memory and intelligent error handling
 - **Audio Integration**: Built-in VLC-based media player with device selection
 - **Security**: Encrypted server configurations with secure key management
 - **Accessibility**: Complete keyboard navigation and screen reader support
 - **Logging**: Silent-by-default logging with environment variable control
+- **Error Handling**: User-friendly error dialogs with retry functionality and specific API error messages
 
 ---
 
@@ -64,6 +65,16 @@
 - **Size Limit**: No size limit (cleared on program exit)
 - **Save Point**: `_save_current_state_to_history()` called before navigation
 - **Restore Point**: `_try_restore_from_history()` called on back navigation
+
+### 3.2 Error Handling Implementation Notes
+1. **No Mock Data** – API failures never return simulated files or example data; failures are transparent to users.
+2. **User-Friendly Dialogs** – API errors display modal dialogs with specific error messages and retry functionality.
+3. **Retry Mechanism** – Error dialogs include "重试" (Retry) and "确定" (OK) buttons; "确定" is the default button.
+4. **Window-Level Modality** – Error dialogs are window-modal, allowing audio playback to continue uninterrupted.
+5. **Screen-Center Display** – Error dialogs appear centered on screen with error icons and proper accessibility labels.
+6. **Empty List on Failure** – When file loading fails, the list displays blank instead of showing mock data.
+7. **Auto-Retry Preservation** – Built-in HTTP-level retry mechanisms (3x for connections, 3x for authentication) are preserved.
+8. **Specific Error Messages** – Dialogs display the actual API error message without modification or filtering.
 
 ---
 
@@ -141,7 +152,17 @@
 - [ ] Navigation history correctly stores and restores positions.
 - [ ] Directory switching doesn't interrupt audio playback.
 
-### 7.3 Audio Playback
+### 7.3 Error Handling
+- [ ] API failures display error dialogs with specific error messages.
+- [ ] Error dialogs show both "重试" (Retry) and "确定" (OK) buttons.
+- [ ] Error dialogs are centered on screen with proper error icons.
+- [ ] File list shows blank when loading fails, no mock data appears.
+- [ ] Retry button successfully reloads the file list.
+- [ ] Error dialogs are window-modal and don't interrupt audio playback.
+- [ ] "确定" button is the default button (activated with Enter key).
+- [ ] All controls in error dialogs have proper accessibility labels.
+
+### 7.4 Audio Playback
 - [ ] Play, pause, and stop update the status bar and current track name.
 - [ ] Space / `Ctrl+Home` only pause/resume active playback; no unintended restarts.
 - [ ] After stopping, repeated pause/resume commands return "no audio playing".
@@ -181,9 +202,9 @@ python demo_logger_switch.py    # Test logging system behavior
 - `CLAUDE.md` — (this document) engineering conventions
 - `AUDIO_PLAYER_UPDATE_SUMMARY.md` — playback change log
 
-**Current version**: v1.1.5 (Status bar optimization for audio-only display)
-**Last update**: 23 Oct 2025
-**Highlights**: status bar dedicated exclusively to audio playback functionality, removed all non-audio status display
+**Current version**: v1.1.6 (Error handling enhancement)
+**Last update**: 24 Oct 2025
+**Highlights**: replaced mock data with user-friendly error dialogs, improved API failure transparency with retry functionality
 
 ---
 
@@ -192,7 +213,8 @@ python demo_logger_switch.py    # Test logging system behavior
 2. **Navigation Consistency**: Directory navigation should preserve user context and provide predictable behavior.
 3. **Audio Integration**: Ensure audio playback is not interrupted by directory operations.
 4. **Security Compliance**: Configuration data must remain encrypted and secure.
-5. **Performance Impact**: Changes should not affect the silent-by-default logging performance.
-6. **Documentation Update**: New features must be documented in this guide before merge.
+5. **Error Handling**: API failures should be transparent to users with clear error messages and recovery options.
+6. **Performance Impact**: Changes should not affect the silent-by-default logging performance.
+7. **Documentation Update**: New features must be documented in this guide before merge.
 
 When proposing a new convention or shortcut, update this guide in the same pull request. Thanks!

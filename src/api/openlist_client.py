@@ -525,44 +525,9 @@ class OpenListClient:
                     raise OpenListAPIError(error_msg)
 
             except Exception as e:
-                self.logger.warning(f"API调用失败，返回模拟数据: {e}")
-                # 返回模拟数据用于测试
-                mock_files = [
-                    {
-                        'name': '示例文档.txt',
-                        'size': 1024,
-                        'modified_time': '2025-10-15T10:30:00Z',
-                        'mime_type': 'text/plain',
-                        'path': '/示例文档.txt',
-                        'id': '1'
-                    },
-                    {
-                        'name': '示例文件夹',
-                        'size': 0,
-                        'modified_time': '2025-10-15T09:15:00Z',
-                        'mime_type': 'inode/directory',
-                        'path': '/示例文件夹',
-                        'id': '2'
-                    },
-                    {
-                        'name': '示例图片.jpg',
-                        'size': 2048576,
-                        'modified_time': '2025-10-14T16:45:00Z',
-                        'mime_type': 'image/jpeg',
-                        'path': '/示例图片.jpg',
-                        'id': '3'
-                    }
-                ]
-
-                # 当per_page=0时，total_pages设为1（表示所有文件在一页中）
-                total_pages = 1 if per_page == 0 else (len(mock_files) + per_page - 1) // per_page
-                return {
-                    'files': mock_files,
-                    'total': len(mock_files),
-                    'page': page,
-                    'per_page': per_page,
-                    'total_pages': total_pages
-                }
+                self.logger.error(f"API调用失败: {e}")
+                # 不再返回模拟数据，直接抛出异常
+                raise OpenListAPIError(f"获取文件列表失败: {e}")
 
         except Exception as e:
             self.logger.error(f"获取文件列表失败: {e}")

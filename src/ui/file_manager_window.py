@@ -227,6 +227,76 @@ class FileManagerWindow(wx.Frame):
         # 绑定快捷键事件
         self.Bind(wx.EVT_MENU, self.on_switch_server_hotkey, id=wx.ID_HIGHEST + 1)
         self.Bind(wx.EVT_MENU, self.on_refresh_hotkey, id=wx.ID_HIGHEST + 2)
+
+    def _show_error_dialog(self, error_message, retry_callback=None):
+        """
+        显示错误对话框
+
+        Args:
+            error_message: 错误信息
+            retry_callback: 重试回调函数，可选
+        """
+        # 创建自定义对话框
+        dialog = wx.Dialog(self, title="错误", style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+
+        # 设置对话框在屏幕中央显示
+        dialog.SetSize((400, 200))
+        dialog.CenterOnScreen()
+
+        # 创建垂直布局
+        main_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # 添加错误图标和消息
+        message_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        # 错误图标
+        icon = wx.ArtProvider.GetBitmap(wx.ART_ERROR, wx.ART_MESSAGE_BOX)
+        icon_ctrl = wx.StaticBitmap(dialog, bitmap=icon)
+        message_sizer.Add(icon_ctrl, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 10)
+
+        # 错误消息
+        message_text = wx.StaticText(dialog, label=str(error_message))
+        message_text.Wrap(350)  # 设置文本换行宽度
+        message_sizer.Add(message_text, 1, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 10)
+
+        main_sizer.Add(message_sizer, 1, wx.EXPAND | wx.ALL, 10)
+
+        # 添加按钮
+        button_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        # 重试按钮（如果提供了重试回调）
+        if retry_callback:
+            retry_btn = wx.Button(dialog, wx.ID_RETRY, "重试")
+            retry_btn.SetName("重试按钮")
+            retry_btn.SetHelpText("重新尝试加载文件列表")
+            retry_btn.Bind(wx.EVT_BUTTON, lambda evt: self._on_retry(dialog, retry_callback))
+            button_sizer.Add(retry_btn, 0, wx.ALL, 5)
+
+        # 确定按钮
+        ok_btn = wx.Button(dialog, wx.ID_OK, "确定")
+        ok_btn.SetName("确定按钮")
+        ok_btn.SetHelpText("关闭错误对话框")
+        ok_btn.SetDefault()  # 设置为默认按钮
+        button_sizer.Add(ok_btn, 0, wx.ALL, 5)
+
+        main_sizer.Add(button_sizer, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+
+        dialog.SetSizer(main_sizer)
+
+        # 设置为窗口级模态
+        dialog.SetWindowModality(wx.WINDOW_MODAL)
+
+        # 显示对话框
+        dialog.ShowModal()
+        dialog.Destroy()
+
+    def _on_retry(self, dialog, retry_callback):
+        """重试按钮点击处理"""
+        dialog.Close()  # 先关闭对话框
+        if retry_callback:
+            retry_callback()  # 执行重试回调
+
+        # 绑定其他快捷键事件
         self.Bind(wx.EVT_MENU, self.on_select_all_hotkey, id=wx.ID_HIGHEST + 3)
         self.Bind(wx.EVT_MENU, self.on_copy_name_hotkey, id=wx.ID_HIGHEST + 4)
         self.Bind(wx.EVT_MENU, self.on_copy_path_hotkey, id=wx.ID_HIGHEST + 5)
@@ -321,9 +391,15 @@ class FileManagerWindow(wx.Frame):
 
         if error is not None:
             message = f"加载文件列表失败: {error}"
-            self.logger.info(message)  # 只记录日志，不更新状态栏
-            # 保持之前的选择状态，不清空列表
-            # 这样可以保留用户当前的选择，避免意外丢失焦点
+            self.logger.error(message)  # 记录错误日志
+
+            # 清空文件列表显示空白
+            self.file_list = []
+            self.file_list_ctrl.load_files([])
+
+            # 显示错误对话框，提供重试功能
+            retry_callback = lambda: self._load_file_list()
+            wx.CallAfter(self._show_error_dialog, error, retry_callback)
             return
 
         self.file_list = files
