@@ -41,6 +41,7 @@ class OpenListClient:
         self.logger = get_logger()
         self.session = None
         self.auth_token = None
+        self.user_info = None  # 存储用户信息
 
         # 初始化会话
         self._init_session()
@@ -281,6 +282,18 @@ class OpenListClient:
                 self.session.headers['Authorization'] = self.auth_token
                 self.logger.info("登录成功")
                 self.logger.debug(f"设置认证头: Authorization = {self.auth_token}")
+
+                # 登录成功后获取用户信息
+                try:
+                    self.user_info = self.get_current_user_info()
+                    self.logger.info("用户信息获取完成")
+                except Exception as e:
+                    # 如果获取用户信息失败，清空token并阻止登录
+                    self.logger.error(f"获取用户信息失败，取消登录: {e}")
+                    self.auth_token = None
+                    self.session.headers.pop('Authorization', None)
+                    raise OpenListAPIError(f"获取用户信息失败，登录被取消: {e}")
+
                 return True
             else:
                 error_msg = response.get('message', '登录失败')
@@ -289,6 +302,39 @@ class OpenListClient:
 
         except Exception as e:
             self.logger.error(f"登录异常: {e}")
+            raise
+
+    def get_current_user_info(self):
+        """
+        获取当前用户信息
+
+        Returns:
+            dict: 用户信息，包含id, username, base_path等字段
+
+        Raises:
+            OpenListAPIError: 获取用户信息失败
+        """
+        try:
+            self.logger.info("获取当前用户信息")
+
+            # 如果没有登录，先尝试登录
+            if not self.auth_token:
+                self.login()
+
+            response = self._make_request('GET', '/api/me')
+
+            if response.get('code') == 200:
+                user_data = response.get('data', {})
+                self.logger.info(f"成功获取用户信息: {user_data.get('username', 'unknown')}")
+                self.logger.debug(f"用户基础路径: {user_data.get('base_path', 'not set')}")
+                return user_data
+            else:
+                error_msg = response.get('message', '获取用户信息失败')
+                self.logger.error(f"获取用户信息失败: {error_msg}")
+                raise OpenListAPIError(f"获取用户信息失败: {error_msg}")
+
+        except Exception as e:
+            self.logger.error(f"获取用户信息异常: {e}")
             raise
 
     def test_connection(self):
@@ -658,19 +704,28 @@ class OpenListClient:
             if normalized_path is None:
                 raise ValueError(f"无效的文件路径: {file_path}")
 
-            # 存储路径映射（根据实际服务器配置调整）
-            path_mappings = {
-                "/opt/czzyfx_openlist_file/": "/",  # 映射到根目录
-                "/opt/czzyfx_openlist_file": "",   # 移除前缀
-            }
-
-            # 尝试路径映射
+            # 获取用户基础路径并构建完整播放路径
             mapped_path = normalized_path
-            for old_prefix, new_prefix in path_mappings.items():
-                if normalized_path.startswith(old_prefix):
-                    mapped_path = normalized_path.replace(old_prefix, new_prefix, 1)
-                    self.logger.debug(f"路径映射: {normalized_path} -> {mapped_path}")
-                    break
+            try:
+                user_base_path = self._get_user_base_path_for_url()
+                if user_base_path:
+                    # 构建完整播放路径：用户基础路径 + 文件相对路径
+                    if normalized_path.startswith('/'):
+                        relative_path = normalized_path[1:]  # 移除开头的斜杠
+                    else:
+                        relative_path = normalized_path
+
+                    # 最终播放路径：用户基础路径 + 文件相对路径
+                    final_file_path = user_base_path.rstrip('/') + '/' + relative_path
+                    mapped_path = '/' + final_file_path.lstrip('/')  # 确保以/开头
+
+                    self.logger.debug(f"构建播放路径: 用户基础路径={user_base_path}, 原始路径={normalized_path}, 最终路径={mapped_path}")
+                else:
+                    # 无法获取用户基础路径，使用原始路径
+                    self.logger.warning("无法获取用户基础路径，使用原始路径")
+            except Exception as e:
+                # 获取用户基础路径失败，使用原始路径
+                self.logger.warning(f"获取用户基础路径失败，使用原始路径: {e}")
 
             # URL构建策略
             base_url = self.base_url
@@ -919,6 +974,39 @@ class OpenListClient:
             self.logger.warning(f"过滤敏感数据时发生错误: {e}")
             # 如果过滤失败，返回空数据以避免泄露
             return {"error": "数据过滤失败"}
+
+    def _get_user_base_path_for_url(self):
+        """
+        获取用户基础路径用于URL构建
+
+        Returns:
+            str: 用户基础路径，如果获取失败返回None
+        """
+        try:
+            # 检查是否有用户信息
+            if not self.user_info:
+                self.logger.warning("用户信息不存在，无法获取基础路径")
+                return None
+
+            base_path = self.user_info.get('base_path')
+            if not base_path:
+                self.logger.warning("用户信息中缺少base_path字段")
+                return None
+
+            # 确保路径以/开头
+            if not base_path.startswith('/'):
+                base_path = '/' + base_path
+
+            # 确保路径以/结尾（方便路径替换操作）
+            if not base_path.endswith('/'):
+                base_path = base_path + '/'
+
+            self.logger.debug(f"URL构建使用基础路径: {base_path}")
+            return base_path
+
+        except Exception as e:
+            self.logger.error(f"获取基础路径用于URL构建失败: {e}")
+            return None
 
     def close(self):
         """关闭客户端连接"""

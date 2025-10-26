@@ -127,7 +127,39 @@
 - **Key Management**: Let `ConfigManager` handle key generation and rotation automatically.
 - **API Security**: Use `OpenListClient` for all network operations; includes path validation and SSL verification.
 
-### 6.2 Logging System Guidelines
+### 6.2 User Authentication and Path Management
+- **User Information Retrieval**: After successful login, automatically call `/api/me` to retrieve user information including `base_path`.
+- **Dynamic Path Construction**: Playback URLs are constructed using `user_base_path + current_browsing_path + filename` instead of hardcoded paths.
+- **Path Storage**: User information is stored in `OpenListClient.user_info` for the duration of the session.
+- **Error Handling**: If user information retrieval fails, login is cancelled and user is prompted to retry.
+- **URL Building**: The final playback path follows the pattern: `{user_base_path}{relative_file_path}` and is encoded for URL safety.
+
+#### 6.2.1 User Information Structure
+```python
+user_info = {
+    'id': user_id,
+    'username': username,
+    'base_path': '/user/username/',  # User's base storage path
+    'role': role,
+    'permissions': [],
+    # ... other fields
+}
+```
+
+#### 6.2.2 Playback URL Construction
+1. **Login Phase**:
+   - Call `/api/auth/login` with credentials
+   - If successful, call `/api/me` to get user info
+   - Store `base_path` from user info
+
+2. **Playback Phase**:
+   - Get current browsing path from `self.current_path`
+   - Get filename from selected file item
+   - Construct: `{base_path}{current_path}/{filename}`
+   - Remove leading `/` for URL encoding
+   - Build final URL: `{server_url}/d/{encoded_path}?sign={signature}`
+
+### 6.3 Logging System Guidelines
 - **Default behavior**: Logging is completely disabled by default for silent operation.
 - **Enable logging**: Set environment variable `OPENLIST_LOG_LEVEL=on` to enable full debug logging.
 - **Log levels**: Can be set to `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, or `on` (full debug).
@@ -162,7 +194,16 @@
 - [ ] "确定" button is the default button (activated with Enter key).
 - [ ] All controls in error dialogs have proper accessibility labels.
 
-### 7.4 Audio Playback
+### 7.4 User Authentication and Dynamic Paths
+- [ ] Login process automatically retrieves user information via `/api/me`.
+- [ ] User base path is correctly stored and used for URL construction.
+- [ ] Playback URLs are built using `user_base_path + current_browsing_path + filename`.
+- [ ] If user info retrieval fails, login is properly cancelled with error message.
+- [ ] Dynamic path construction works for both root and subdirectory browsing.
+- [ ] URL encoding properly handles Chinese characters and special symbols.
+- [ ] Final playback URLs follow the pattern: `{server_url}/d/{encoded_path}?sign={signature}`.
+
+### 7.5 Audio Playback
 - [ ] Play, pause, and stop update the status bar and current track name.
 - [ ] Space / `Ctrl+Home` only pause/resume active playback; no unintended restarts.
 - [ ] After stopping, repeated pause/resume commands return "no audio playing".
@@ -182,13 +223,13 @@ python test_audio_player.py
 python demo_logger_switch.py    # Test logging system behavior
 ```
 
-### 7.5 Security & Configuration Verification
+### 7.6 Security & Configuration Verification
 - [ ] Server configurations are encrypted and stored securely.
 - [ ] Passwords are never logged or exposed in error messages.
 - [ ] SSL certificate verification works correctly.
 - [ ] Path injection protection prevents malicious directory traversal.
 
-### 7.6 Logging System Verification
+### 7.7 Logging System Verification
 - [ ] Default operation produces no log output or files.
 - [ ] With `OPENLIST_LOG_LEVEL=on`, all debug information is captured.
 - [ ] Log files are created in `logs/` directory with proper rotation.
@@ -197,24 +238,26 @@ python demo_logger_switch.py    # Test logging system behavior
 
 ---
 
-## 8. Documentation Map
+## 9. Documentation Map
 - `README.md` — complete project documentation (includes user guide, logging system, troubleshooting)
 - `CLAUDE.md` — (this document) engineering conventions
 - `AUDIO_PLAYER_UPDATE_SUMMARY.md` — playback change log
 
-**Current version**: v1.1.6 (Error handling enhancement)
-**Last update**: 24 Oct 2025
-**Highlights**: replaced mock data with user-friendly error dialogs, improved API failure transparency with retry functionality
+**Current version**: v1.1.7 (Dynamic path construction enhancement)
+**Last update**: 26 Oct 2025
+**Highlights**: added user information retrieval, implemented dynamic path construction for playback URLs, removed hardcoded storage paths
 
 ---
 
-## 9. Code Review Focus
+## 10. Code Review Focus
 1. **Accessibility First**: All changes must maintain or improve screen reader support and keyboard navigation.
 2. **Navigation Consistency**: Directory navigation should preserve user context and provide predictable behavior.
 3. **Audio Integration**: Ensure audio playback is not interrupted by directory operations.
 4. **Security Compliance**: Configuration data must remain encrypted and secure.
 5. **Error Handling**: API failures should be transparent to users with clear error messages and recovery options.
-6. **Performance Impact**: Changes should not affect the silent-by-default logging performance.
-7. **Documentation Update**: New features must be documented in this guide before merge.
+6. **User Information Management**: Login process must successfully retrieve and store user information for dynamic path construction.
+7. **Path Construction**: Playback URLs must use dynamic user-based paths instead of hardcoded values.
+8. **Performance Impact**: Changes should not affect the silent-by-default logging performance.
+9. **Documentation Update**: New features must be documented in this guide before merge.
 
 When proposing a new convention or shortcut, update this guide in the same pull request. Thanks!

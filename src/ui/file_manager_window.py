@@ -475,6 +475,40 @@ class FileManagerWindow(wx.Frame):
         self.logger.info(f"状态更新: {message}")
         # 注意：状态栏现在专门用于音频播放显示，不再显示其他状态信息
 
+    def _get_user_base_path(self):
+        """
+        获取用户基础路径
+
+        Returns:
+            str: 用户基础路径，如果获取失败返回None
+
+        Raises:
+            Exception: 当用户信息不存在或base_path字段缺失时
+        """
+        try:
+            # 检查客户端是否有用户信息
+            if not hasattr(self.client, 'user_info') or not self.client.user_info:
+                raise Exception("用户信息不存在，请重新登录")
+
+            base_path = self.client.user_info.get('base_path')
+            if not base_path:
+                raise Exception("用户信息中缺少base_path字段，请联系管理员")
+
+            # 确保路径以/开头
+            if not base_path.startswith('/'):
+                base_path = '/' + base_path
+
+            # 确保路径以/结尾（方便后续处理）
+            if not base_path.endswith('/'):
+                base_path = base_path + '/'
+
+            self.logger.debug(f"获取用户基础路径: {base_path}")
+            return base_path
+
+        except Exception as e:
+            self.logger.error(f"获取用户基础路径失败: {e}")
+            raise
+
     def on_item_activated(self, event):
         """文件项双击事件"""
         index = event.GetIndex()
@@ -750,14 +784,11 @@ class FileManagerWindow(wx.Frame):
         try:
             import urllib.parse
 
-            # 构建文件路径
-            if file_item["path"]:
-                file_path = file_item["path"]
+            # 构建文件路径：使用用户当前浏览路径 + 文件名
+            if self.current_path == "/":
+                file_path = f"/{file_item['name']}"
             else:
-                if self.current_path == "/":
-                    file_path = f"/{file_item['name']}"
-                else:
-                    file_path = f"{self.current_path}/{file_item['name']}"
+                file_path = f"{self.current_path}/{file_item['name']}"
 
             self.logger.debug(f"构建文件URL，文件路径: {file_path}")
 
@@ -768,10 +799,29 @@ class FileManagerWindow(wx.Frame):
                 # 使用签名构建下载URL
                 self.logger.debug(f"使用签名构建下载URL")
 
-                # 移除存储前缀
-                clean_path = file_path.replace('/opt/czzyfx_openlist_file/', '', 1)
-                if clean_path.startswith('/'):
-                    clean_path = clean_path[1:]  # 移除开头的斜杠
+                # 获取用户基础路径并构建完整播放路径
+                try:
+                    user_base_path = self._get_user_base_path()
+                    if not user_base_path:
+                        raise Exception("无法获取用户基础路径，请检查用户配置")
+
+                    # 构建完整播放路径：用户基础路径 + 文件相对路径
+                    # 如果文件路径已经是绝对路径（以/开头），移除开头的斜杠
+                    if file_path.startswith('/'):
+                        relative_path = file_path[1:]  # 移除开头的斜杠
+                    else:
+                        relative_path = file_path
+
+                    # 最终播放路径：用户基础路径 + 文件相对路径
+                    final_file_path = user_base_path.rstrip('/') + '/' + relative_path
+                    clean_path = final_file_path[1:]  # 移除开头的斜杠用于URL构建
+
+                    self.logger.debug(f"构建播放路径: 用户基础路径={user_base_path}, 文件路径={file_path}, 最终路径={final_file_path}")
+
+                except Exception as e:
+                    # 获取用户基础路径失败，使用原始文件路径
+                    self.logger.error(f"构建播放路径失败，使用原始路径: {e}")
+                    clean_path = file_path.lstrip('/')  # 移除开头的斜杠
 
                 # URL编码路径
                 encoded_path = urllib.parse.quote(clean_path, safe='')
@@ -787,8 +837,8 @@ class FileManagerWindow(wx.Frame):
                 else:
                     base_url = server_url
 
-                # 构建最终URL：http://server:port/d/file/encoded_path?sign=signature
-                final_url = f"{base_url}/d/file/{encoded_path}?sign={sign}"
+                # 构建最终URL：http://server:port/d/encoded_path?sign=signature
+                final_url = f"{base_url}/d/{encoded_path}?sign={sign}"
 
                 self.logger.debug(f"构建的签名URL: {final_url}")
                 print(f"[URL构建] 使用签名URL: {final_url}")
@@ -1037,16 +1087,11 @@ class FileManagerWindow(wx.Frame):
             import webbrowser
             import urllib.parse
 
-            # 构建完整的文件URL
-            if file_item["path"]:
-                # 如果有路径信息，使用路径
-                file_path = file_item["path"]
+            # 构建完整的文件URL：使用用户当前浏览路径 + 文件名
+            if self.current_path == "/":
+                file_path = f"/{file_item['name']}"
             else:
-                # 否则使用当前路径+文件名
-                if self.current_path == "/":
-                    file_path = f"/{file_item['name']}"
-                else:
-                    file_path = f"{self.current_path}/{file_item['name']}"
+                file_path = f"{self.current_path}/{file_item['name']}"
 
             # 构建完整的URL，包含端口
             server_url = self.server_info.get('url', '').rstrip('/')
