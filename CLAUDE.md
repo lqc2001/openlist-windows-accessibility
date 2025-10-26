@@ -105,13 +105,19 @@
 - `F5` — refresh current directory and select first item
 
 ### 5.3 Audio Playback (global)
-- `Ctrl+Home` — pause/resume, only when audio is currently playing or paused  
-- `Ctrl+End` — stop playback and clear the active file reference  
-- `Ctrl+PageUp / PageDown` — previous / next track  
-- `Ctrl+Left / Right` — seek backward / forward  
-- `Ctrl+Up / Down` — volume up / down  
-- `Space` — identical to `Ctrl+Home`; works regardless of focus location  
-- **Fallback behavior**: if neither playing nor paused, the shortcut simply logs "no audio playing" (no implicit load). Status bar is managed exclusively by AudioPlayerController.
+- `Ctrl+Home` — pause/resume current playback (controls current playing file, not selected)
+- `Ctrl+End` — stop playback and clear the active file reference
+- `Ctrl+PageUp / PageDown` — previous / next track
+- `Ctrl+Left / Right` — seek backward / forward
+- `Ctrl+Up / Down` — volume up / down
+- `Space` — identical to `Ctrl+Home`; works regardless of focus location
+- **Fallback behavior**: if no current file, shortcuts will resume playing the last selected file via Enter, or automatically play the first audio file in the directory. Status bar is managed exclusively by AudioPlayerController.
+
+### 5.4 File Selection vs Playback Control
+- **Enter / Double-click** — play selected file (replaces current playback and remembers selection)
+- **Audio shortcuts** — control current playback only (does not switch to selected file)
+- **After stopping** — shortcuts resume playing the last file selected via Enter
+- **Smart recovery** — if no file was ever selected via Enter, automatically plays first audio file in directory
 
 ---
 

@@ -52,6 +52,9 @@ class FileManagerWindow(wx.Frame):
         # 音频播放控制器
         self.audio_controller = AudioPlayerController(self)
 
+        # 记住最后通过回车键选择的文件（用于停止后恢复播放）
+        self._last_selected_file = None
+
         # 初始化UI
         self._create_ui()
         self._create_menu()
@@ -199,6 +202,7 @@ class FileManagerWindow(wx.Frame):
 
     def _setup_accelerators(self):
         """设置快捷键"""
+        self.logger.info("正在设置快捷键表...")
         accel_tbl = wx.AcceleratorTable([
             (wx.ACCEL_CTRL, ord('Q'), wx.ID_HIGHEST + 1),  # Ctrl+Q 切换服务器
             (wx.ACCEL_NORMAL, wx.WXK_F5, wx.ID_HIGHEST + 2),  # F5 刷新
@@ -223,10 +227,31 @@ class FileManagerWindow(wx.Frame):
             (wx.ACCEL_NORMAL, wx.WXK_SPACE, wx.ID_HIGHEST + 28),      # 空格键 - 播放/暂停
         ])
         self.SetAcceleratorTable(accel_tbl)
+        self.logger.info("快捷键表设置完成")
 
         # 绑定快捷键事件
         self.Bind(wx.EVT_MENU, self.on_switch_server_hotkey, id=wx.ID_HIGHEST + 1)
         self.Bind(wx.EVT_MENU, self.on_refresh_hotkey, id=wx.ID_HIGHEST + 2)
+        self.Bind(wx.EVT_MENU, self.on_select_all_hotkey, id=wx.ID_HIGHEST + 3)
+        self.Bind(wx.EVT_MENU, self.on_copy_name_hotkey, id=wx.ID_HIGHEST + 4)
+        self.Bind(wx.EVT_MENU, self.on_copy_path_hotkey, id=wx.ID_HIGHEST + 5)
+        self.Bind(wx.EVT_MENU, self.on_web_open_hotkey, id=wx.ID_HIGHEST + 6)
+        self.Bind(wx.EVT_MENU, self.on_view_info_hotkey, id=wx.ID_HIGHEST + 7)
+        self.Bind(wx.EVT_MENU, self.on_batch_download_hotkey, id=wx.ID_HIGHEST + 8)
+        self.Bind(wx.EVT_MENU, self.on_open_hotkey, id=wx.ID_HIGHEST + 9)
+
+        # 音频播放快捷键事件
+        self.logger.info("正在绑定音频快捷键事件...")
+        self.Bind(wx.EVT_MENU, self.on_play_pause_hotkey, id=wx.ID_HIGHEST + 20)
+        self.Bind(wx.EVT_MENU, self.on_stop_playback_hotkey, id=wx.ID_HIGHEST + 21)
+        self.Bind(wx.EVT_MENU, self.on_previous_track_hotkey, id=wx.ID_HIGHEST + 22)
+        self.Bind(wx.EVT_MENU, self.on_next_track_hotkey, id=wx.ID_HIGHEST + 23)
+        self.Bind(wx.EVT_MENU, self.on_seek_backward_hotkey, id=wx.ID_HIGHEST + 24)
+        self.Bind(wx.EVT_MENU, self.on_seek_forward_hotkey, id=wx.ID_HIGHEST + 25)
+        self.Bind(wx.EVT_MENU, self.on_volume_up_hotkey, id=wx.ID_HIGHEST + 26)
+        self.Bind(wx.EVT_MENU, self.on_volume_down_hotkey, id=wx.ID_HIGHEST + 27)
+        self.Bind(wx.EVT_MENU, self.on_space_hotkey, id=wx.ID_HIGHEST + 28)
+        self.logger.info("音频快捷键事件绑定完成")
 
     def _show_error_dialog(self, error_message, retry_callback=None):
         """
@@ -296,25 +321,8 @@ class FileManagerWindow(wx.Frame):
         if retry_callback:
             retry_callback()  # 执行重试回调
 
-        # 绑定其他快捷键事件
-        self.Bind(wx.EVT_MENU, self.on_select_all_hotkey, id=wx.ID_HIGHEST + 3)
-        self.Bind(wx.EVT_MENU, self.on_copy_name_hotkey, id=wx.ID_HIGHEST + 4)
-        self.Bind(wx.EVT_MENU, self.on_copy_path_hotkey, id=wx.ID_HIGHEST + 5)
-        self.Bind(wx.EVT_MENU, self.on_web_open_hotkey, id=wx.ID_HIGHEST + 6)
-        self.Bind(wx.EVT_MENU, self.on_view_info_hotkey, id=wx.ID_HIGHEST + 7)
-        self.Bind(wx.EVT_MENU, self.on_batch_download_hotkey, id=wx.ID_HIGHEST + 8)
-        self.Bind(wx.EVT_MENU, self.on_open_hotkey, id=wx.ID_HIGHEST + 9)
-
-        # 音频播放快捷键事件
-        self.Bind(wx.EVT_MENU, self.on_play_pause_hotkey, id=wx.ID_HIGHEST + 20)
-        self.Bind(wx.EVT_MENU, self.on_stop_playback_hotkey, id=wx.ID_HIGHEST + 21)
-        self.Bind(wx.EVT_MENU, self.on_previous_track_hotkey, id=wx.ID_HIGHEST + 22)
-        self.Bind(wx.EVT_MENU, self.on_next_track_hotkey, id=wx.ID_HIGHEST + 23)
-        self.Bind(wx.EVT_MENU, self.on_seek_backward_hotkey, id=wx.ID_HIGHEST + 24)
-        self.Bind(wx.EVT_MENU, self.on_seek_forward_hotkey, id=wx.ID_HIGHEST + 25)
-        self.Bind(wx.EVT_MENU, self.on_volume_up_hotkey, id=wx.ID_HIGHEST + 26)
-        self.Bind(wx.EVT_MENU, self.on_volume_down_hotkey, id=wx.ID_HIGHEST + 27)
-        self.Bind(wx.EVT_MENU, self.on_space_hotkey, id=wx.ID_HIGHEST + 28)
+        # 注意：所有快捷键事件绑定已移动到 _setup_accelerators 方法中
+        # 这里不再需要重复绑定
 
     def _bind_events(self):
         """绑定事件"""
@@ -576,12 +584,33 @@ class FileManagerWindow(wx.Frame):
         # 退格键 - 返回上级目录
         if key_code == wx.WXK_BACK:
             self._go_back()
+            return  # 不继续处理事件
+
+        # 对于其他按键，让事件继续传播到快捷键处理
         event.Skip()
 
     def on_main_key_down(self, event):
         """主窗口键盘事件处理"""
         key_code = event.GetKeyCode()
         raw_key_code = event.GetRawKeyCode()
+
+        # 调试：记录特殊按键
+        if event.ControlDown():
+            ctrl_name = {
+                wx.WXK_HOME: "Home",
+                wx.WXK_END: "End",
+                wx.WXK_PAGEUP: "PageUp",
+                wx.WXK_PAGEDOWN: "PageDown",
+                wx.WXK_LEFT: "Left",
+                wx.WXK_RIGHT: "Right",
+                wx.WXK_UP: "Up",
+                wx.WXK_DOWN: "Down",
+                wx.WXK_F5: "F5",
+                wx.WXK_SPACE: "Space"
+            }.get(key_code, f"KeyCode_{key_code}")
+
+            if ctrl_name != f"KeyCode_{key_code}":
+                self.logger.info(f"检测到 Ctrl+{ctrl_name} 按键")
 
         # 检查是否按下了 Shift+F10 (标准上下文菜单快捷键)
         if key_code == wx.WXK_F10 and event.ShiftDown():
@@ -1180,17 +1209,16 @@ class FileManagerWindow(wx.Frame):
     def _handle_space_key_playback(self):
         """处理空格键播放/暂停"""
         try:
-            success = self.audio_controller.play_pause()
-            if not success:
-                # 只记录日志，不更新状态栏（状态栏由音频控制器自动更新）
-                self.logger.info("当前没有正在播放的音频")
+            # 只控制当前播放，不切换到选中文件
+            self._control_current_playback()
 
         except Exception as e:
             self.logger.error(f"空格键播放控制失败: {e}")
 
     def on_play_pause(self, event):
         """播放/暂停菜单事件"""
-        self._play_selected_or_current()
+        # 只控制当前播放，不切换到选中文件
+        self._control_current_playback()
 
     def on_stop_playback(self, event):
         """停止播放菜单事件"""
@@ -1198,6 +1226,7 @@ class FileManagerWindow(wx.Frame):
 
     def on_space_hotkey(self, event):
         """空格键全局播放/暂停"""
+        self.logger.info("空格键播放/暂停快捷键被触发")
         self._handle_space_key_playback()
 
     def on_previous_track(self, event):
@@ -1233,39 +1262,92 @@ class FileManagerWindow(wx.Frame):
     # 播放快捷键事件处理
     def on_play_pause_hotkey(self, event):
         """播放/暂停快捷键事件"""
-        if not self.audio_controller.play_pause():
-            # 只记录日志，不更新状态栏（状态栏由音频控制器自动更新）
-            self.logger.info("当前没有正在播放的音频")
+        self.logger.info("播放/暂停快捷键被触发")
+        # 只控制当前播放，不切换到选中文件
+        self._control_current_playback()
 
     def on_stop_playback_hotkey(self, event):
         """停止播放快捷键事件"""
+        self.logger.info("停止播放快捷键被触发")
         self.audio_controller.stop()
 
     def on_previous_track_hotkey(self, event):
         """上一个曲目快捷键事件"""
+        self.logger.info("上一曲快捷键被触发")
         self._play_previous_audio()
 
     def on_next_track_hotkey(self, event):
         """下一个曲目快捷键事件"""
+        self.logger.info("下一曲快捷键被触发")
         self._play_next_audio()
 
     def on_seek_backward_hotkey(self, event):
         """快退快捷键事件"""
+        self.logger.info("快退快捷键被触发")
         self.audio_controller.seek_backward(5)
 
     def on_seek_forward_hotkey(self, event):
         """快进快捷键事件"""
+        self.logger.info("快进快捷键被触发")
         self.audio_controller.seek_forward(5)
 
     def on_volume_up_hotkey(self, event):
         """音量增加快捷键事件"""
+        self.logger.info("音量增加快捷键被触发")
         self.audio_controller.volume_up(5)
 
     def on_volume_down_hotkey(self, event):
         """音量减少快捷键事件"""
+        self.logger.info("音量减少快捷键被触发")
         self.audio_controller.volume_down(5)
 
     # 辅助方法
+    def _control_current_playback(self):
+        """控制当前播放（用于快捷键和菜单，不切换到选中文件）"""
+        try:
+            if self.audio_controller.current_file:
+                # 有当前播放文件，直接控制播放/暂停
+                self.audio_controller.play_pause()
+                self.logger.info("控制当前播放文件")
+            else:
+                # 没有当前播放文件，优先播放最后选择的文件
+                target_file = None
+                target_index = -1
+
+                if self._last_selected_file:
+                    # 优先使用最后通过回车键选择的文件
+                    target_file = self._last_selected_file
+                    # 在文件列表中找到这个文件的索引
+                    for idx, item in enumerate(self.file_list):
+                        if item['name'] == target_file['name']:
+                            target_index = idx
+                            break
+                    self.logger.info(f"恢复播放最后选择的文件: {target_file['name']}")
+                else:
+                    # 没有最后选择的文件，播放列表中的第一个音频文件
+                    for idx, item in enumerate(self.file_list):
+                        if MediaFileDetector.is_media_file(item['name']):
+                            media_type = MediaFileDetector.get_media_type(item['name'])
+                            if media_type == 'audio':
+                                target_file = item
+                                target_index = idx
+                                break
+                    if target_file:
+                        self.logger.info(f"自动播放第一个音频文件: {target_file['name']}")
+
+                if target_file:
+                    file_url = self._build_file_url(target_file)
+                    self.audio_controller.play_file(file_url, target_file['name'])
+                    if target_index >= 0:
+                        self._select_file_index(target_index)
+                else:
+                    self.logger.info("当前目录没有音频文件")
+                    wx.MessageBox("当前目录没有音频文件", "提示", wx.OK | wx.ICON_INFORMATION)
+
+        except Exception as e:
+            self.logger.error(f"播放控制失败: {e}")
+            wx.MessageBox(f"播放控制失败: {e}", "错误", wx.OK | wx.ICON_ERROR)
+
     def _play_selected_or_current(self):
         """播放选中文件或控制当前播放"""
         try:
@@ -1442,6 +1524,9 @@ class FileManagerWindow(wx.Frame):
                     self.logger.info(f"使用音频控制器播放: {file_item['name']}")
                     file_url = self._build_file_url(file_item)
                     self.audio_controller.play_file(file_url, file_item['name'])
+                    # 记住最后通过回车键选择的文件
+                    self._last_selected_file = file_item
+                    self.logger.info(f"已记住最后选择的文件: {file_item['name']}")
                     # 不再更新状态栏，状态栏由音频控制器自动更新
                 else:
                     # 视频文件使用原来的播放器窗口
