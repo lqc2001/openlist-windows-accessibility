@@ -557,20 +557,49 @@ class FileManagerWindow(wx.Frame):
             wx.MessageBox(f"文件夹导航失败: {e}", "错误", wx.OK | wx.ICON_ERROR)
 
     def _open_file(self, file_item):
-        """打开文件"""
+        """打开文件 - 根据API返回的文件类型进行不同处理"""
         try:
-            self.logger.info(f"准备打开文件: {file_item['name']}")
+            self.logger.info(f"准备打开文件: {file_item['name']} (类型: {file_item['mime_type']})")
 
-            # 检查是否为媒体文件
-            if MediaFileDetector.is_media_file(file_item['name']):
+            # 根据API返回的mime_type进行处理
+            mime_type = file_item['mime_type']
+
+            if mime_type == 'audio':
+                # 音频文件：使用现有音频播放器
                 self._play_media_file(file_item)
+
+            elif mime_type == 'video':
+                # 视频文件：弹框提示等待开发，然后用网页打开
+                self._show_development_dialog("视频播放", file_item)
+                self.on_context_web_open(file_item)
+
+            elif mime_type == 'image':
+                # 图片文件：直接用网页打开
+                self.on_context_web_open(file_item)
+
+            elif mime_type == 'text':
+                # 文本文档：弹框提示等待开发，然后用网页打开
+                self._show_development_dialog("文本文档查看", file_item)
+                self.on_context_web_open(file_item)
+
             else:
-                # 非媒体文件的默认处理
-                wx.MessageBox(f"文件操作功能待实现\n\n文件名: {file_item['name']}\n大小: {file_item['size']}\n类型: {file_item['mime_type']}",
-                             "文件信息", wx.OK | wx.ICON_INFORMATION)
+                # 其他文件（包括 'file' 类型）：直接用网页打开
+                self.on_context_web_open(file_item)
+
         except Exception as e:
             self.logger.error(f"打开文件失败: {e}")
             wx.MessageBox(f"打开文件失败: {e}", "错误", wx.OK | wx.ICON_ERROR)
+
+    def _show_development_dialog(self, feature_name, file_item):
+        """显示功能开发中对话框"""
+        dialog = wx.MessageDialog(
+            self,
+            f"{feature_name}功能正在开发中，敬请期待！\n\n当前将使用网页方式打开。",
+            feature_name,
+            wx.OK | wx.ICON_INFORMATION
+        )
+        dialog.ShowModal()
+        dialog.Destroy()
 
     def on_char(self, event):
         """键盘事件处理"""

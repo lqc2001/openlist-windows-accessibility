@@ -20,6 +20,7 @@
 
 ### 1.1 Key Features
 - **File Management**: Smart directory navigation with position memory and intelligent error handling
+- **File Type Handling**: API-driven file type detection with appropriate actions for audio, video, images, text, and other files
 - **Audio Integration**: Built-in VLC-based media player with device selection
 - **Security**: Encrypted server configurations with secure key management
 - **Accessibility**: Complete keyboard navigation and screen reader support
@@ -78,7 +79,74 @@
 
 ---
 
-## 4. Audio Playback Implementation Notes
+## 4. File Type Handling Implementation Notes
+
+### 4.1 API-Driven File Type Detection
+The application uses OpenList API responses to determine file types, not filename extensions. The API returns a `type` field (integer) that gets mapped to mime_type strings:
+
+```python
+type_mapping = {
+    0: 'file',        # Regular file
+    1: 'folder',      # Directory
+    2: 'video',       # Video file
+    3: 'audio',       # Audio file
+    4: 'text',        # Text document
+    5: 'image'        # Image file
+}
+```
+
+### 4.2 File Type Processing Logic
+
+#### 4.2.1 Main Entry Point
+The `_open_file()` method in `FileManagerWindow` handles all file opening based on API-returned `mime_type`:
+
+- **Audio files** (`mime_type == 'audio'`): Use existing `AudioPlayerController` for playback
+- **Video files** (`mime_type == 'video'`): Show development dialog, then open in browser
+- **Image files** (`mime_type == 'image'`): Open directly in browser
+- **Text documents** (`mime_type == 'text'`): Show development dialog, then open in browser
+- **Other files** (`mime_type == 'file'` or unknown): Open directly in browser
+
+#### 4.2.2 Development Dialog Pattern
+For features under development (video playback, text document viewing), the application uses `_show_development_dialog()`:
+
+```python
+def _show_development_dialog(self, feature_name, file_item):
+    """Display development-in-progress dialog"""
+    dialog = wx.MessageDialog(
+        self,
+        f"{feature_name}功能正在开发中，敬请期待！\n\n当前将使用网页方式打开。",
+        feature_name,
+        wx.OK | wx.ICON_INFORMATION
+    )
+    dialog.ShowModal()
+    dialog.Destroy()
+```
+
+#### 4.2.3 Web Browser Opening
+The `on_context_web_open()` method handles browser-based file opening:
+- Constructs URL from server URL, port, current path, and filename
+- Uses `webbrowser.open()` to launch default browser
+- Handles URL encoding for special characters
+- Logs success/failure appropriately
+
+### 4.3 File Type Handling Guidelines
+
+1. **API-First Approach**: Always use API-returned `mime_type`, never file extensions
+2. **User-Friendly Fallbacks**: For unsupported file types, fall back to browser opening
+3. **Progressive Enhancement**: Show development dialogs for future functionality
+4. **Consistent Logging**: Log file type information for debugging: `f"准备打开文件: {file_item['name']} (类型: {file_item['mime_type']})"`
+5. **Error Handling**: Gracefully handle failed file operations with user feedback
+
+### 4.4 Integration Points
+
+- **File Selection**: `on_item_activated()` calls `_open_file()` on Enter/Double-click
+- **Right-Click Menu**: Context menu provides additional file operations
+- **Keyboard Shortcuts**: Ctrl+W for web open, O for open, consistent with existing patterns
+- **Navigation**: File type processing doesn't interrupt directory navigation or audio playback
+
+---
+
+## 5. Audio Playback Implementation Notes
 1. **File detection** – always use `MediaFileDetector` to identify playable items.
 2. **Single controller** – UI code should speak only to `AudioPlayerController`.
 3. **State sync** – update status bar, selected list item, and controller state together (`_select_file_index` is the helper).
@@ -209,7 +277,19 @@ user_info = {
 - [ ] URL encoding properly handles Chinese characters and special symbols.
 - [ ] Final playback URLs follow the pattern: `{server_url}/d/{encoded_path}?sign={signature}`.
 
-### 7.5 Audio Playback
+### 7.5 File Type Handling
+- [ ] Audio files (`mime_type == 'audio'`) are played using AudioPlayerController.
+- [ ] Video files show development dialog and then open in browser.
+- [ ] Image files open directly in browser without any dialog.
+- [ ] Text documents show development dialog and then open in browser.
+- [ ] Other files (`mime_type == 'file'`) open directly in browser.
+- [ ] Development dialogs use consistent Chinese messaging and proper icons.
+- [ ] File type logging includes both filename and mime_type for debugging.
+- [ ] File type processing doesn't interrupt audio playback or navigation.
+- [ ] Browser opening uses correct URL construction with server, port, path, and filename.
+- [ ] Error handling for file operations shows user-friendly error messages.
+
+### 7.6 Audio Playback
 - [ ] Play, pause, and stop update the status bar and current track name.
 - [ ] Space / `Ctrl+Home` only pause/resume active playback; no unintended restarts.
 - [ ] After stopping, repeated pause/resume commands return "no audio playing".
@@ -220,7 +300,7 @@ user_info = {
 - [ ] Status bar displays only audio-related information: playback status, time, progress, volume/device, and playback rate.
 - [ ] Non-audio operations (file loading, navigation, connection status) only log to console, never display in status bar.
 
-### 7.4 Suggested scripts
+### 7.7 Suggested scripts
 ```bash
 python test_startup.py
 python test_tab_navigation.py
@@ -249,21 +329,22 @@ python demo_logger_switch.py    # Test logging system behavior
 - `CLAUDE.md` — (this document) engineering conventions
 - `AUDIO_PLAYER_UPDATE_SUMMARY.md` — playback change log
 
-**Current version**: v1.1.7 (Dynamic path construction enhancement)
-**Last update**: 26 Oct 2025
-**Highlights**: added user information retrieval, implemented dynamic path construction for playback URLs, removed hardcoded storage paths
+**Current version**: v1.1.8 (API-driven file type handling)
+**Last update**: 05 Nov 2025
+**Highlights**: implemented API-driven file type detection and processing, added appropriate handling for audio, video, image, text, and other files
 
 ---
 
 ## 10. Code Review Focus
 1. **Accessibility First**: All changes must maintain or improve screen reader support and keyboard navigation.
 2. **Navigation Consistency**: Directory navigation should preserve user context and provide predictable behavior.
-3. **Audio Integration**: Ensure audio playback is not interrupted by directory operations.
+3. **Audio Integration**: Ensure audio playback is not interrupted by directory operations or file type processing.
 4. **Security Compliance**: Configuration data must remain encrypted and secure.
 5. **Error Handling**: API failures should be transparent to users with clear error messages and recovery options.
 6. **User Information Management**: Login process must successfully retrieve and store user information for dynamic path construction.
-7. **Path Construction**: Playback URLs must use dynamic user-based paths instead of hardcoded values.
-8. **Performance Impact**: Changes should not affect the silent-by-default logging performance.
-9. **Documentation Update**: New features must be documented in this guide before merge.
+7. **File Type Processing**: File handling must use API-returned `mime_type`, never filename extensions, with appropriate user feedback for different file types.
+8. **Path Construction**: Playback URLs must use dynamic user-based paths instead of hardcoded values.
+9. **Performance Impact**: Changes should not affect the silent-by-default logging performance.
+10. **Documentation Update**: New features must be documented in this guide before merge.
 
 When proposing a new convention or shortcut, update this guide in the same pull request. Thanks!
