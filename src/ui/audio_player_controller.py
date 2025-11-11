@@ -631,6 +631,20 @@ class AudioPlayerController:
         else:
             return "已停止"
 
+    def _clear_status_bar(self):
+        """清理状态栏显示"""
+        try:
+            if self.status_bar:
+                # 清空所有状态栏字段
+                self.status_bar.SetStatusText("", 0)  # 播放状态
+                self.status_bar.SetStatusText("", 1)  # 播放时间
+                self.status_bar.SetStatusText("", 2)  # 进度百分比
+                self.status_bar.SetStatusText("", 3)  # 音量/设备
+                self.status_bar.SetStatusText("", 4)  # 播放倍速
+                self.logger.debug("状态栏已清理")
+        except Exception as e:
+            self.logger.error(f"清理状态栏失败: {e}")
+
     def cleanup(self):
         """清理资源"""
         try:

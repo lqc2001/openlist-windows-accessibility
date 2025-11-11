@@ -11,8 +11,8 @@
 - **Directory layout**
   ```text
   src/
-    ui/               # windowing & interaction (main_frame, file_manager_window, dialogs)
-    media/            # VLC wrapper and playback control (audio_player, media_player_core, vlc_loader)
+    ui/               # windowing & interaction (main_frame, file_manager_window, dialogs, video_player_window)
+    media/            # VLC wrapper and playback control (audio_player, media_player_core, vlc_loader, video_player)
     core/             # logging, configuration, utilities (logger, config_manager, version)
     api/              # OpenList API client (openlist_client)
     accessibility/    # light-weight accessibility helpers (future expansion)
@@ -21,7 +21,8 @@
 ### 1.1 Key Features
 - **File Management**: Smart directory navigation with position memory and intelligent error handling
 - **File Type Handling**: API-driven file type detection with appropriate actions for audio, video, images, text, and other files
-- **Audio Integration**: Built-in VLC-based media player with device selection
+- **Audio Integration**: Built-in VLC-based media player with device selection and audio track switching
+- **Video Integration**: Complete video player with audio track switching, menu controls, and accessibility support
 - **Security**: Encrypted server configurations with secure key management
 - **Accessibility**: Complete keyboard navigation and screen reader support
 - **Logging**: Silent-by-default logging with environment variable control
@@ -160,6 +161,26 @@ The `on_context_web_open()` method handles browser-based file opening:
 
 ---
 
+## 6. Video Playback Implementation Notes
+1. **Full-Screen Architecture** – VideoPlayerWindow creates a dedicated full-screen window for video playback with comprehensive menu controls.
+2. **Audio Interruption** – Video playback automatically stops any active audio playback and manages state transitions.
+3. **Menu System** – Replicates audio player's complete menu structure with video-specific controls and audio track switching.
+4. **Audio Track Support** – Complete audio track detection, switching, and management with multi-language support.
+   - **Track Detection**: Automatically detects audio tracks after video starts playing (2-second delay for VLC parsing)
+   - **Menu Integration**: Dynamic audio track menu under "播放(&P)" → "音轨(&T)" with real-time updates
+   - **Track Types**: Supports multiple audio formats, language identification, and track metadata
+   - **Screen Reader Support**: Audio track names are properly formatted for screen readers (e.g., "轨道 1 - [中文]")
+   - **Refresh Capability**: Manual refresh option when track detection fails or tracks become available
+   - **Current Track Indication**: Visual checkmarks indicate active audio track in menu
+5. **State Management** – Proper coordination between video and audio playback states, preventing conflicts.
+6. **Accessibility** – Full keyboard navigation, screen reader support, and menu accessibility compliance.
+7. **Error Handling** – Graceful error handling for media loading, playback issues, and menu operations.
+8. **Title Display** – Shows original video filename in window title with playback status and time information.
+9. **Progress Tracking** – Real-time progress display with time formatting and seek functionality.
+10. **Clean Exit** – Proper resource cleanup and state restoration when closing video windows.
+
+---
+
 ## 5. Shortcut Contracts
 ### 5.1 General
 - `Alt+letter` — primary actions in menus/dialogs  
@@ -181,7 +202,16 @@ The `on_context_web_open()` method handles browser-based file opening:
 - `Space` — identical to `Ctrl+Home`; works regardless of focus location
 - **Fallback behavior**: if no current file, shortcuts will resume playing the last selected file via Enter, or automatically play the first audio file in the directory. Status bar is managed exclusively by AudioPlayerController.
 
-### 5.4 File Selection vs Playback Control
+### 5.4 Video Playback (full-screen mode)
+- `Space` — play/pause video playback
+- `ESC` — exit video player and return to file browser
+- `Left / Right` — seek backward/forward 10 seconds
+- `Up / Down` — volume up/down
+- `F` — toggle fullscreen mode
+- `Alt+P` — show/hide menu with full video controls
+- **Audio Track Switching**: Alt+P → 音轨(T) → select track (multi-language videos only)
+
+### 5.5 File Selection vs Playback Control
 - **Enter / Double-click** — play selected file (replaces current playback and remembers selection)
 - **Audio shortcuts** — control current playback only (does not switch to selected file)
 - **After stopping** — shortcuts resume playing the last file selected via Enter
@@ -329,13 +359,88 @@ python demo_logger_switch.py    # Test logging system behavior
 - `CLAUDE.md` — (this document) engineering conventions
 - `AUDIO_PLAYER_UPDATE_SUMMARY.md` — playback change log
 
-**Current version**: v1.1.8 (API-driven file type handling)
-**Last update**: 05 Nov 2025
-**Highlights**: implemented API-driven file type detection and processing, added appropriate handling for audio, video, image, text, and other files
+**Current version**: v1.1.8 (Complete Audio Track Functionality)
+**Last update**: 12 Nov 2025
+**Highlights**: complete audio track detection and switching functionality for video playback, with accessibility support and dynamic menu system
 
 ---
 
-## 10. Code Review Focus
+## 10. Development History & Key Fixes
+
+### 10.1 Shortcut System & Playback Logic Evolution
+
+#### Problem Analysis (Historical)
+Early versions suffered from inconsistent shortcut behavior and confusing playback logic:
+
+1. **Shortcut Binding Issue**: Audio shortcuts were incorrectly bound in `_on_retry()` method instead of `_setup_accelerators()`
+2. **Event Handling Inconsistency**: Menu and shortcuts used different code paths
+3. **Playback Logic Confusion**: Users expected music player-like behavior but got file-manager behavior
+
+#### Key Architectural Changes
+
+**Fix 1: Correct Shortcut Binding**
+```python
+# Before (incorrect)
+def _on_retry(self, dialog, retry_callback):
+    self.Bind(wx.EVT_MENU, self.on_play_pause_hotkey, id=wx.ID_HIGHEST + 20)
+
+# After (correct)
+def _setup_accelerators(self):
+    self.Bind(wx.EVT_MENU, self.on_play_pause_hotkey, id=wx.ID_HIGHEST + 20)
+```
+
+**Fix 2: Separated Playback Logic**
+- **File Selection**: Enter/DoubleClick plays selected file and remembers selection
+- **Playback Control**: Shortcuts/menus control current playing file only
+- **Smart Recovery**: Stopped playback resumes last selected file via Enter
+
+#### Implementation Details
+
+**Core Methods Added**:
+```python
+def _play_selected_file(self):
+    """Play selected file and remember for recovery"""
+
+def _control_current_playback(self):
+    """Control current playback without changing selected file"""
+
+def _resume_last_selected(self):
+    """Resume last file selected via Enter"""
+```
+
+**State Management**:
+- `current_file`: Currently playing file
+- `last_selected_file`: Last file selected via Enter
+- Smart fallback to first audio file when no selection exists
+
+### 10.2 Audio Track Detection Implementation
+
+#### Technical Challenges
+- VLC API returns -1 when no media loaded
+- Media parsing requires delay for complete track detection
+- Menu system needs dynamic updates without replacing entire menubar
+
+#### Solutions Implemented
+- **2-second delay** after video start for track detection
+- **Remove+Insert pattern** for menu updates (wx.Menu has no Replace method)
+- **RadioItem usage** for multi-track scenarios with visual checkmarks
+
+#### Code Architecture
+```python
+def get_available_audio_tracks(self) -> list:
+    # Handle VLC API -1 return values correctly
+    track_count = self.vlc_player.audio_get_track_count()
+    if track_count <= 0: return []
+
+def _refresh_audio_tracks_menu(self):
+    # Dynamic menu updates with proper wxPython patterns
+    play_menu.Remove(track_item)
+    new_item = play_menu.Insert(pos, -1, title, new_menu)
+```
+
+---
+
+## 11. Code Review Focus
 1. **Accessibility First**: All changes must maintain or improve screen reader support and keyboard navigation.
 2. **Navigation Consistency**: Directory navigation should preserve user context and provide predictable behavior.
 3. **Audio Integration**: Ensure audio playback is not interrupted by directory operations or file type processing.

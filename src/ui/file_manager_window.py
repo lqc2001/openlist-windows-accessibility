@@ -15,6 +15,7 @@ from src.core.version import get_about_text, get_version_info
 from src.media.file_detector import MediaFileDetector
 from src.ui.media_player_window import MediaPlayerWindow
 from src.ui.audio_player_controller import AudioPlayerController
+from src.ui.video_player_window import VideoPlayerWindow
 
 
 class FileManagerWindow(wx.Frame):
@@ -48,6 +49,7 @@ class FileManagerWindow(wx.Frame):
 
         # 媒体播放器相关
         self.media_player_window = None
+        self.video_player_window = None  # 新增：视频播放窗口
 
         # 音频播放控制器
         self.audio_controller = AudioPlayerController(self)
@@ -569,9 +571,8 @@ class FileManagerWindow(wx.Frame):
                 self._play_media_file(file_item)
 
             elif mime_type == 'video':
-                # 视频文件：弹框提示等待开发，然后用网页打开
-                self._show_development_dialog("视频播放", file_item)
-                self.on_context_web_open(file_item)
+                # 视频文件：使用新的全屏视频播放器
+                self._play_video_file(file_item)
 
             elif mime_type == 'image':
                 # 图片文件：直接用网页打开
@@ -1569,29 +1570,44 @@ class FileManagerWindow(wx.Frame):
             wx.MessageBox(f"播放失败: {e}", "错误", wx.OK | wx.ICON_ERROR)
 
     def _play_video_file(self, file_item):
-        """播放视频文件（使用原来的播放器窗口）"""
+        """播放视频文件（使用全屏视频播放器）"""
         try:
             self.logger.info(f"开始播放视频文件: {file_item['name']}")
-            # 不再更新状态栏，状态栏仅用于音频播放器控制器
+
+            # 检查并停止音频播放
+            if self.audio_controller.is_playing or self.audio_controller.is_paused:
+                self.logger.info("检测到音频播放中，停止音频播放")
+                self.audio_controller.stop()
+                # 清理状态栏显示
+                self.audio_controller._clear_status_bar()
 
             # 构建文件URL
             file_url = self._build_file_url(file_item)
 
-            # 创建或显示播放器窗口
-            if self.media_player_window is None:
-                self.media_player_window = MediaPlayerWindow(self, file_url)
-                self.media_player_window.Show()
-            else:
-                self.media_player_window.load_and_play_file(file_url)
-                self.media_player_window.Show()
-                self.media_player_window.Raise()
+            # 如果已有视频窗口在播放，先关闭
+            if self.video_player_window is not None:
+                self.logger.info("关闭现有视频播放窗口")
+                self.video_player_window._cleanup()
+                self.video_player_window = None
 
-            # 不再更新状态栏，状态栏仅用于音频播放器控制器
+            # 创建新的全屏视频播放窗口
+            self.logger.info(f"创建全屏视频播放窗口: {file_url}")
+            self.video_player_window = VideoPlayerWindow(
+                parent=self,
+                video_url=file_url,
+                on_close_callback=self._on_video_window_closed
+            )
+
+            self.video_player_window.Show()
 
         except Exception as e:
             self.logger.error(f"播放视频文件失败: {e}")
-            # 不再更新状态栏，状态栏仅用于音频播放器控制器
             wx.MessageBox(f"播放视频文件失败: {e}", "播放错误", wx.OK | wx.ICON_ERROR)
+
+    def _on_video_window_closed(self):
+        """视频播放窗口关闭回调"""
+        self.logger.info("视频播放窗口已关闭")
+        self.video_player_window = None
 
 
 class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):

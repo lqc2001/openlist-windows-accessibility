@@ -64,6 +64,9 @@ class MediaPlayerCore:
         self.volume = 100
         self.is_muted = False
 
+        # 播放倍速控制
+        self.playback_rate = 1.0
+
         # 循环控制
         self.repeat_mode = "none"  # none, one, all
 
@@ -490,6 +493,247 @@ class MediaPlayerCore:
         except:
             return 0
 
+    def set_playback_rate(self, rate: float) -> bool:
+        """
+        设置播放倍速
+
+        Args:
+            rate: 播放倍速 (0.5, 1.0, 1.5, 2.0, 3.0等)
+
+        Returns:
+            bool: 是否设置成功
+        """
+        try:
+            if not self.vlc_player:
+                return False
+
+            # VLC支持的范围是0.25到4.0
+            if 0.25 <= rate <= 4.0:
+                self.vlc_player.set_rate(rate)
+                self.playback_rate = rate
+                self.logger.debug(f"设置播放倍速: {rate}x")
+                self._trigger_event('on_playback_rate_changed', rate)
+                return True
+            else:
+                self.logger.error(f"无效的播放倍速: {rate}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"设置播放倍速失败: {e}")
+            return False
+
+    def get_playback_rate(self) -> float:
+        """获取当前播放倍速"""
+        try:
+            if self.vlc_player:
+                self.playback_rate = self.vlc_player.get_rate()
+            return self.playback_rate
+        except:
+            return 1.0
+
+    def get_available_audio_tracks(self) -> list:
+        """获取可用的音频轨道列表
+
+        Returns:
+            list: 音频轨道信息列表
+        """
+        try:
+            if not self.vlc_player:
+                return []
+
+            audio_tracks = []
+
+            # 方法1: 首先检查是否有媒体正在播放 (最可靠的方法)
+            try:
+                track_count = self.vlc_player.audio_get_track_count()
+                self.logger.debug(f"VLC audio_get_track_count() 返回: {track_count}")
+
+                # VLC返回-1表示没有媒体或错误，>0表示有音轨，0表示媒体存在但没有音轨
+                if track_count > 0:
+                    # 有音轨，尝试获取详细信息
+                    try:
+                        track_description = self.vlc_player.audio_get_track_description()
+                        self.logger.debug(f"VLC audio_get_track_description() 返回: {track_description}")
+
+                        if track_description and len(track_description) > 0:
+                            # 使用VLC提供的轨道描述
+                            for track_id, track_name in track_description:
+                                # 处理轨道名称（可能是bytes类型）
+                                if isinstance(track_name, bytes):
+                                    try:
+                                        track_name = track_name.decode('utf-8')
+                                    except:
+                                        track_name = str(track_name)
+
+                                # 跳过"禁用"选项（track_id为-1）
+                                if track_id == -1 and "禁用" in track_name:
+                                    continue
+
+                                # 包含所有有效轨道（包括ID为0的轨道）
+                                if track_id >= 0:
+                                    audio_tracks.append({
+                                        'id': track_id,
+                                        'name': track_name or f"音轨 {track_id}",
+                                        'language': '',
+                                        'type': 'audio'
+                                    })
+
+                            # 如果从描述中获取的轨道数量少于实际数量，补充默认轨道
+                            if len(audio_tracks) < track_count:
+                                existing_ids = {track['id'] for track in audio_tracks}
+                                for i in range(track_count):
+                                    if i not in existing_ids:
+                                        audio_tracks.append({
+                                            'id': i,
+                                            'name': f"音轨 {i + 1}",
+                                            'language': '',
+                                            'type': 'audio'
+                                        })
+                        else:
+                            # 如果没有描述，基于数量创建默认音轨
+                            # VLC音轨ID可能从0开始，所以从0开始编号
+                            for i in range(track_count):
+                                audio_tracks.append({
+                                    'id': i,
+                                    'name': f"音轨 {i + 1}",  # 显示名称从1开始
+                                    'language': '',
+                                    'type': 'audio'
+                                })
+                    except Exception as e:
+                        self.logger.debug(f"获取轨道描述失败，使用默认方式: {e}")
+                        # 降级到基础方式
+                        for i in range(track_count):
+                            audio_tracks.append({
+                                'id': i,
+                                'name': f"音轨 {i + 1}",
+                                'language': '',
+                                'type': 'audio'
+                            })
+
+                elif track_count == 0:
+                    # 明确返回0表示媒体存在但没有音频轨道
+                    self.logger.debug("媒体存在但没有音频轨道")
+                else:  # track_count == -1
+                    # -1表示没有媒体加载或其他错误
+                    self.logger.debug("没有媒体加载或VLC状态异常")
+
+            except Exception as e:
+                self.logger.error(f"获取音轨数量失败: {e}")
+
+            # 方法2: 如果上面的方法失败，尝试从媒体信息获取详细信息 (备用方法)
+            if not audio_tracks and self.vlc_media:
+                try:
+                    # 获取媒体信息 (这个API可能不稳定)
+                    media_info = self.vlc_media.get_media_info()
+                    if media_info:
+                        # 获取音轨信息
+                        audio_info = media_info.audio_tracks()
+                        if audio_info:
+                            track_count = audio_info.count()
+                            for i in range(track_count):
+                                try:
+                                    track = audio_info.at(i)
+                                    track_id = i  # VLC音轨ID可能从0开始
+                                    track_name = getattr(track, 'description', lambda: f"音轨 {i + 1}")()
+                                    track_language = getattr(track, 'language', lambda: "")()
+
+                                    # 格式化轨道名称
+                                    if track_language:
+                                        name = f"{track_name} ({track_language})"
+                                    else:
+                                        name = track_name
+
+                                    audio_tracks.append({
+                                        'id': track_id,
+                                        'name': name,
+                                        'language': track_language,
+                                        'type': 'audio'
+                                    })
+                                except Exception as e:
+                                    self.logger.debug(f"处理媒体信息音轨 {i} 失败: {e}")
+                                    # 创建基础音轨
+                                    audio_tracks.append({
+                                        'id': i,
+                                        'name': f"音轨 {i + 1}",
+                                        'language': '',
+                                        'type': 'audio'
+                                    })
+                except Exception as e:
+                    self.logger.debug(f"从媒体信息获取音轨失败: {e}")
+
+            self.logger.debug(f"最终获取到 {len(audio_tracks)} 个音频轨道")
+            return audio_tracks
+
+        except Exception as e:
+            self.logger.error(f"获取音频轨道列表失败: {e}")
+            return []
+
+    def set_audio_track(self, track_id: int) -> bool:
+        """设置音频轨道
+
+        Args:
+            track_id: 轨道ID
+
+        Returns:
+            bool: 是否设置成功
+        """
+        try:
+            if not self.vlc_player:
+                return False
+
+            # 设置音频轨道
+            self.vlc_player.audio_set_track(track_id)
+            self.logger.debug(f"设置音频轨道: {track_id}")
+
+            # 触发轨道变更事件
+            self._trigger_event('on_audio_track_changed', track_id)
+            return True
+
+        except Exception as e:
+            self.logger.error(f"设置音频轨道失败: {e}")
+            return False
+
+    def get_current_audio_track(self) -> int:
+        """获取当前音频轨道ID
+
+        Returns:
+            int: 当前轨道ID，0表示无轨道
+        """
+        try:
+            if not self.vlc_player:
+                return 0
+
+            current_track = self.vlc_player.audio_get_track()
+            return current_track if current_track > 0 else 0
+
+        except Exception as e:
+            self.logger.error(f"获取当前音频轨道失败: {e}")
+            return 0
+
+    def get_current_audio_track_info(self) -> dict:
+        """获取当前音频轨道信息
+
+        Returns:
+            dict: 轨道信息字典
+        """
+        try:
+            current_id = self.get_current_audio_track()
+            if current_id == 0:
+                return {}
+
+            # 获取所有轨道信息
+            all_tracks = self.get_available_audio_tracks()
+
+            for track in all_tracks:
+                if track.get('id') == current_id:
+                    return track
+
+            return {'id': current_id, 'name': f"音轨 {current_id}", 'type': 'audio'}
+
+        except Exception as e:
+            self.logger.error(f"获取当前音频轨道信息失败: {e}")
+            return {}
+
     def set_mute(self, muted: bool) -> bool:
         """
         设置静音
@@ -556,6 +800,47 @@ class MediaPlayerCore:
         except:
             return 1.0
 
+    def set_fullscreen(self, fullscreen: bool) -> bool:
+        """设置全屏模式
+
+        Args:
+            fullscreen: 是否全屏
+
+        Returns:
+            bool: 是否设置成功
+        """
+        try:
+            if self.vlc_player:
+                self.vlc_player.set_fullscreen(fullscreen)
+                self.logger.debug(f"设置全屏模式: {fullscreen}")
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"设置全屏模式失败: {e}")
+            return False
+
+    def get_fullscreen(self) -> bool:
+        """获取当前全屏状态"""
+        try:
+            if self.vlc_player:
+                return self.vlc_player.get_fullscreen()
+            return False
+        except:
+            return False
+
+    def toggle_fullscreen(self) -> bool:
+        """切换全屏模式"""
+        try:
+            if self.vlc_player:
+                current = self.vlc_player.get_fullscreen()
+                self.vlc_player.set_fullscreen(not current)
+                self.logger.debug(f"切换全屏模式: {not current}")
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"切换全屏模式失败: {e}")
+            return False
+
     def get_media_info(self) -> MediaInfo:
         """获取当前媒体信息"""
         # 更新当前时间
@@ -598,6 +883,8 @@ class MediaPlayerCore:
         self.state = MediaPlayerState.STOPPED
         self.current_media_info.current_time = 0
         self._trigger_event('on_state_changed', self.state)
+        # 触发播放完成事件
+        self._trigger_event('on_finished')
 
     def _on_time_changed(self, event):
         """播放时间变化事件"""
