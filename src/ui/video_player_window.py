@@ -251,8 +251,11 @@ class VideoPlayerWindow(wx.Frame):
                     try:
                         current_device = self.video_player.get_current_audio_device_info()
                         if current_device and current_device.get('id') == device_id:
-                            # 在菜单项前添加勾选标记
-                            device_item.Check(True)
+                            # 确保菜单项是可检查的，然后添加勾选标记
+                            if device_item.IsCheckable():
+                                device_item.Check(True)
+                            else:
+                                self.logger.debug(f"设备菜单项不可检查: {device_name}")
                     except Exception as e:
                         self.logger.debug(f"获取当前设备信息失败: {e}")
 
@@ -379,8 +382,11 @@ class VideoPlayerWindow(wx.Frame):
                     try:
                         current_track_id = self.video_player.get_current_audio_track()
                         if current_track_id == track_id and len(tracks) > 1:
-                            # 在菜单项前添加勾选标记
-                            track_item.Check(True)
+                            # 确保菜单项是可检查的，然后添加勾选标记
+                            if track_item.IsCheckable():
+                                track_item.Check(True)
+                            else:
+                                self.logger.debug(f"音轨菜单项不可检查: {track_name}")
                     except Exception as e:
                         self.logger.debug(f"获取当前音轨信息失败: {e}")
 
@@ -687,7 +693,11 @@ class VideoPlayerWindow(wx.Frame):
                 self._force_menu_display()
 
         except Exception as e:
-            self.logger.error(f"临时退出全屏失败: {e}")
+            # 优雅处理已删除对象
+            if "has been deleted" in str(e):
+                self.logger.debug("视频窗口对象已被销毁，忽略全屏操作")
+            else:
+                self.logger.error(f"临时退出全屏失败: {e}")
 
     def _force_menu_display(self):
         """强制显示菜单"""
@@ -1138,7 +1148,11 @@ class VideoPlayerWindow(wx.Frame):
 
             self.logger.debug("菜单可见性已强制刷新")
         except Exception as e:
-            self.logger.error(f"强制菜单可见性失败: {e}")
+            # 只在这里添加优雅的错误处理
+            if "has been deleted" in str(e):
+                self.logger.debug("菜单对象已被销毁，忽略操作")
+            else:
+                self.logger.error(f"强制菜单可见性失败: {e}")
 
     def _restore_fullscreen(self):
         """恢复全屏模式"""
@@ -1147,7 +1161,11 @@ class VideoPlayerWindow(wx.Frame):
                 self.ShowFullScreen(True)
                 self.logger.info("全屏模式已恢复")
         except Exception as e:
-            self.logger.error(f"恢复全屏失败: {e}")
+            # 优雅处理已删除对象
+            if "has been deleted" in str(e):
+                self.logger.debug("窗口对象已销毁，忽略全屏恢复")
+            else:
+                self.logger.error(f"恢复全屏失败: {e}")
 
     # 播放控制方法
     def _toggle_playback(self):
@@ -1192,7 +1210,7 @@ class VideoPlayerWindow(wx.Frame):
                         new_time = self.video_player.get_current_time()
                         self.logger.info(f"快退成功 - 新时间: {new_time}ms")
                         # 强制更新进度显示
-                        self._update_progress_display()
+                        self._update_progress()
                     else:
                         self.logger.warning("快退操作失败")
                 else:
@@ -1224,7 +1242,7 @@ class VideoPlayerWindow(wx.Frame):
                         new_time = self.video_player.get_current_time()
                         self.logger.info(f"快进成功 - 新时间: {new_time}ms")
                         # 强制更新进度显示
-                        self._update_progress_display()
+                        self._update_progress()
                     else:
                         self.logger.warning("快进操作失败")
                 else:
@@ -1487,12 +1505,18 @@ class VideoPlayerWindow(wx.Frame):
     def on_close(self, event):
         """窗口关闭事件"""
         try:
+            self.logger.info("开始关闭视频播放器窗口")
+
+            # 暂时注释掉我们的修改，恢复原始逻辑
+            # self._cleanup_timers()
+
             self._cleanup()
 
             # 调用关闭回调函数
             if self.on_close_callback:
                 self.on_close_callback()
 
+            self.logger.info("视频播放器窗口关闭完成")
             event.Skip()
         except Exception as e:
             self.logger.error(f"关闭窗口时发生错误: {e}")
@@ -1536,6 +1560,25 @@ class VideoPlayerWindow(wx.Frame):
         """视频播放完成回调"""
         self.logger.info("视频播放完成")
         wx.CallAfter(self._exit_fullscreen)
+
+    def _cleanup_timers(self):
+        """清理所有活动定时器"""
+        try:
+            # 清理全屏恢复定时器 - 使用更安全的检查方式
+            if hasattr(self, '_fullscreen_restore_timer'):
+                try:
+                    if self._fullscreen_restore_timer and hasattr(self._fullscreen_restore_timer, 'Stop'):
+                        self._fullscreen_restore_timer.Stop()
+                    self._fullscreen_restore_timer = None
+                    self.logger.debug("全屏恢复定时器已清理")
+                except Exception as timer_error:
+                    self.logger.debug(f"清理全屏定时器时出错（可能是正常的）: {timer_error}")
+
+            # 清理其他可能的定时器
+            # 这里可以添加更多定时器的清理逻辑
+
+        except Exception as e:
+            self.logger.error(f"清理定时器失败: {e}")
 
     def _cleanup(self):
         """清理资源"""
