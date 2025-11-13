@@ -394,6 +394,19 @@ class VideoPlayer:
             return {}
         return self.player_core.get_current_audio_device_info()
 
+    def set_video_window(self, window_handle) -> bool:
+        """设置视频渲染窗口
+
+        Args:
+            window_handle: 窗口句柄（Windows上为HWND，Linux上为XID）
+
+        Returns:
+            bool: 是否设置成功
+        """
+        if not self.is_initialized:
+            return False
+        return self.player_core.set_video_window(window_handle)
+
     def get_media_info(self):
         """获取媒体信息"""
         if not self.is_initialized:

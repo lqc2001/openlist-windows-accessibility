@@ -150,6 +150,11 @@ class VideoPlayerWindow(wx.Frame):
         # 使用垂直布局
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
+        # 创建视频渲染面板（占据大部分空间）
+        self.video_panel = wx.Panel(main_panel)
+        self.video_panel.SetBackgroundColour(wx.BLACK)
+        self.video_panel.SetMinSize((640, 360))  # 设置最小尺寸
+
         # 标题标签（可选显示）
         self.title_label = wx.StaticText(
             main_panel,
@@ -181,11 +186,10 @@ class VideoPlayerWindow(wx.Frame):
         self.control_label.SetFont(control_font)
 
         # 添加到布局
-        main_sizer.AddStretchSpacer()
-        main_sizer.Add(self.title_label, 0, wx.EXPAND | wx.ALL, 20)
-        main_sizer.Add(self.time_label, 0, wx.EXPAND | wx.ALL, 10)
+        main_sizer.Add(self.video_panel, 1, wx.EXPAND | wx.ALL, 5)  # 视频面板占据所有可用空间
+        main_sizer.Add(self.title_label, 0, wx.EXPAND | wx.ALL, 10)
+        main_sizer.Add(self.time_label, 0, wx.EXPAND | wx.ALL, 5)
         main_sizer.Add(self.control_label, 0, wx.EXPAND | wx.ALL, 10)
-        main_sizer.AddStretchSpacer()
 
         main_panel.SetSizer(main_sizer)
 
@@ -934,6 +938,19 @@ class VideoPlayerWindow(wx.Frame):
         """设置视频播放器"""
         try:
             self.video_player = VideoPlayer()
+
+            # 设置视频渲染窗口
+            if hasattr(self, 'video_panel'):
+                # 获取视频面板的窗口句柄
+                window_handle = self.video_panel.GetHandle()
+                if window_handle:
+                    success = self.video_player.set_video_window(window_handle)
+                    if success:
+                        self.logger.info(f"视频窗口设置成功，句柄: {window_handle}")
+                    else:
+                        self.logger.warning(f"视频窗口设置失败，句柄: {window_handle}")
+                else:
+                    self.logger.warning("无法获取视频面板句柄")
 
             # 设置回调函数
             self.video_player.set_play_callback(self._on_video_play)

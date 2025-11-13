@@ -439,7 +439,7 @@ class VLCLoader:
         if platform.system() == 'Windows':
             vlc_args.extend([
                 '--aout=directsound',        # Windows音频输出
-                '--vout=dummy',               # 使用虚拟视频输出避免冲突
+                # 移除--vout=dummy以支持视频渲染
             ])
 
         # 创建VLC实例

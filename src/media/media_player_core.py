@@ -841,6 +841,42 @@ class MediaPlayerCore:
             self.logger.error(f"切换全屏模式失败: {e}")
             return False
 
+    def set_video_window(self, window_handle) -> bool:
+        """设置视频渲染窗口
+
+        Args:
+            window_handle: 窗口句柄（Windows上为HWND，Linux上为XID）
+
+        Returns:
+            bool: 是否设置成功
+        """
+        try:
+            if not self.vlc_player:
+                return False
+
+            if hasattr(self.vlc_player, 'set_hwnd'):
+                # Windows平台
+                self.vlc_player.set_hwnd(window_handle)
+                self.logger.debug(f"设置Windows视频窗口句柄: {window_handle}")
+                return True
+            elif hasattr(self.vlc_player, 'set_xwindow'):
+                # Linux平台
+                self.vlc_player.set_xwindow(window_handle)
+                self.logger.debug(f"设置X11视频窗口句柄: {window_handle}")
+                return True
+            elif hasattr(self.vlc_player, 'set_nsobject'):
+                # macOS平台
+                self.vlc_player.set_nsobject(window_handle)
+                self.logger.debug(f"设置macOS视频窗口对象: {window_handle}")
+                return True
+            else:
+                self.logger.warning("当前VLC版本不支持视频窗口设置")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"设置视频窗口失败: {e}")
+            return False
+
     def get_media_info(self) -> MediaInfo:
         """获取当前媒体信息"""
         # 更新当前时间
@@ -1480,25 +1516,73 @@ class MediaPlayerCore:
     def cleanup(self):
         """清理播放器资源"""
         try:
-            # 停止播放
-            if self.vlc_player:
-                self.vlc_player.stop()
+            self.logger.debug("开始清理媒体播放器资源")
 
-            # 释放VLC资源
-            if self.vlc_media:
-                self.vlc_media.release()
-            if self.vlc_player:
-                self.vlc_player.release()
-            if self.vlc_media_list_player:
-                self.vlc_media_list_player.release()
-            if self.vlc_media_list:
-                self.vlc_media_list.release()
+            # 停止播放 - 添加更安全的检查
+            if self.vlc_player is not None:
+                try:
+                    self.vlc_player.stop()
+                except Exception as stop_error:
+                    self.logger.warning(f"停止播放时出错: {stop_error}")
 
-            # 清理VLC加载器
-            if self.vlc_loader:
-                self.vlc_loader.cleanup()
+            # 按照依赖关系顺序释放VLC资源
+            # 先释放媒体和播放器相关的资源
+            if self.vlc_media is not None:
+                try:
+                    self.vlc_media.release()
+                    self.logger.debug("已释放VLC媒体资源")
+                except Exception as media_error:
+                    self.logger.warning(f"释放VLC媒体资源时出错: {media_error}")
+                finally:
+                    self.vlc_media = None
 
-            self.logger.info("媒体播放器资源已清理")
+            if self.vlc_player is not None:
+                try:
+                    self.vlc_player.release()
+                    self.logger.debug("已释放VLC播放器")
+                except Exception as player_error:
+                    self.logger.warning(f"释放VLC播放器时出错: {player_error}")
+                finally:
+                    self.vlc_player = None
+
+            if self.vlc_media_list_player is not None:
+                try:
+                    self.vlc_media_list_player.release()
+                    self.logger.debug("已释放VLC媒体列表播放器")
+                except Exception as list_player_error:
+                    self.logger.warning(f"释放VLC媒体列表播放器时出错: {list_player_error}")
+                finally:
+                    self.vlc_media_list_player = None
+
+            if self.vlc_media_list is not None:
+                try:
+                    self.vlc_media_list.release()
+                    self.logger.debug("已释放VLC媒体列表")
+                except Exception as list_error:
+                    self.logger.warning(f"释放VLC媒体列表时出错: {list_error}")
+                finally:
+                    self.vlc_media_list = None
+
+            # 最后清理VLC加载器
+            if self.vlc_loader is not None:
+                try:
+                    self.vlc_loader.cleanup()
+                    self.logger.debug("已清理VLC加载器")
+                except Exception as loader_error:
+                    self.logger.warning(f"清理VLC加载器时出错: {loader_error}")
+                finally:
+                    self.vlc_loader = None
+
+            self.logger.info("媒体播放器资源已清理完成")
 
         except Exception as e:
             self.logger.error(f"清理播放器资源失败: {e}")
+            import traceback
+            self.logger.debug(f"清理异常详情: {traceback.format_exc()}")
+        finally:
+            # 确保所有引用都被清空
+            self.vlc_media = None
+            self.vlc_player = None
+            self.vlc_media_list_player = None
+            self.vlc_media_list = None
+            self.vlc_loader = None
