@@ -16,6 +16,7 @@ from src.media.file_detector import MediaFileDetector
 from src.ui.media_player_window import MediaPlayerWindow
 from src.ui.audio_player_controller import AudioPlayerController
 from src.ui.video_player_window import VideoPlayerWindow
+import pypinyin
 
 
 class FileManagerWindow(wx.Frame):
@@ -154,9 +155,9 @@ class FileManagerWindow(wx.Frame):
 
         # 视图菜单
         view_menu = wx.Menu()
-        sort_name_item = view_menu.AppendRadioItem(wx.ID_ANY, "按名称排序(&N)")
-        sort_size_item = view_menu.AppendRadioItem(wx.ID_ANY, "按大小排序(&S)")
-        sort_date_item = view_menu.AppendRadioItem(wx.ID_ANY, "按日期排序(&D)")
+        sort_name_item = view_menu.Append(wx.ID_HIGHEST + 100, "按名称排序(&N)", "按名称排序文件")
+        sort_size_item = view_menu.Append(wx.ID_HIGHEST + 101, "按大小排序(&S)", "按大小排序文件")
+        sort_date_item = view_menu.Append(wx.ID_HIGHEST + 102, "按日期排序(&D)", "按日期排序文件")
 
         # 帮助菜单
         help_menu = wx.Menu()
@@ -736,9 +737,11 @@ class FileManagerWindow(wx.Frame):
         """保存当前目录状态到历史栈"""
         if self.file_list:  # 只有当文件列表不为空时才保存
             current_selected = self.file_list_ctrl.GetFirstSelected()
+            # 确保保存的是FileListCtrl中当前排序的文件列表
+            current_files = self.file_list_ctrl.files.copy()
             history_entry = {
                 'path': self.current_path,
-                'files': self.file_list.copy(),
+                'files': current_files,
                 'selected_index': current_selected if current_selected != -1 else 0
             }
             self._navigation_history.append(history_entry)
@@ -762,7 +765,12 @@ class FileManagerWindow(wx.Frame):
         if top_entry['path'] == expected_path:
             # 恢复状态
             self.file_list = top_entry['files']
+            # 设置标志，跳过自动排序（因为历史栈中保存的已经是正确排序的文件列表）
+            self.file_list_ctrl._skip_auto_sort = True
             self.file_list_ctrl.load_files(top_entry['files'])
+            # 恢复后清除标志
+            if hasattr(self.file_list_ctrl, '_skip_auto_sort'):
+                delattr(self.file_list_ctrl, '_skip_auto_sort')
 
             # 恢复选中状态
             if top_entry['files'] and 0 <= top_entry['selected_index'] < len(top_entry['files']):
@@ -1622,6 +1630,9 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
         )
         listmix.ListCtrlAutoWidthMixin.__init__(self)
 
+        # 添加日志记录器
+        self.logger = get_logger()
+
         # 设置列
         self.InsertColumn(0, "名称", width=250)
         self.InsertColumn(1, "类型", width=100)
@@ -1643,6 +1654,20 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
         try:
             data = files if files is not None else []
             self.files = data
+
+            # 应用默认排序（按名称拼音排序）
+            # 只有在非历史栈恢复时才应用自动排序
+            if self.files and len(self.files) > 0 and not hasattr(self, '_skip_auto_sort'):
+                self.sort_column = 0
+                self.sort_ascending = True
+
+                # 拼音排序函数
+                def chinese_sort_key(name):
+                    pinyin_list = pypinyin.lazy_pinyin(name)
+                    return ''.join(pinyin_list)
+
+                self.files.sort(key=lambda x: chinese_sort_key(x["name"]))
+
             count = len(self.files)
             self.SetItemCount(count)
             self.Refresh()
@@ -1728,10 +1753,16 @@ class FileListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
 
     
     def sort_by_name(self):
-        """按名称排序"""
+        """按名称排序（使用拼音排序）"""
         self.sort_column = 0
         self.sort_ascending = not self.sort_ascending
-        self.files.sort(key=lambda x: x["name"], reverse=not self.sort_ascending)
+
+        # 拼音排序函数：将中文转换为拼音，非中文保持原样
+        def chinese_sort_key(name):
+            pinyin_list = pypinyin.lazy_pinyin(name)
+            return ''.join(pinyin_list)
+
+        self.files.sort(key=lambda x: chinese_sort_key(x["name"]), reverse=not self.sort_ascending)
         self._refresh_display()
 
     def sort_by_size(self):

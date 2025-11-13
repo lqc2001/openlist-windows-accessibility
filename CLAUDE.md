@@ -5,8 +5,8 @@
 ---
 
 ## 1. Project Overview
-- **Tech stack**: wxPython, requests, python-vlc, cryptography
-- **Focus**: Screen-reader friendly UI, full keyboard navigation, integrated audio playback with device selection, secure configuration management
+- **Tech stack**: wxPython, requests, python-vlc, cryptography, pypinyin
+- **Focus**: Screen-reader friendly UI, full keyboard navigation, integrated audio playback with device selection, secure configuration management, Chinese localization
 - **Architecture**: Layered architecture with modular design, event-driven patterns, and intelligent caching
 - **Directory layout**
   ```text
@@ -19,7 +19,7 @@
   ```
 
 ### 1.1 Key Features
-- **File Management**: Smart directory navigation with position memory and intelligent error handling
+- **File Management**: Smart directory navigation with position memory, intelligent error handling, and Chinese pinyin sorting
 - **File Type Handling**: API-driven file type detection with appropriate actions for audio, video, images, text, and other files
 - **Audio Integration**: Built-in VLC-based media player with device selection and audio track switching
 - **Video Integration**: Complete video player with audio track switching, menu controls, and accessibility support
@@ -27,6 +27,7 @@
 - **Accessibility**: Complete keyboard navigation and screen reader support
 - **Logging**: Silent-by-default logging with environment variable control
 - **Error Handling**: User-friendly error dialogs with retry functionality and specific API error messages
+- **Chinese Localization**: Pinyin-based file name sorting for Chinese users
 
 ---
 
@@ -68,7 +69,45 @@
 - **Save Point**: `_save_current_state_to_history()` called before navigation
 - **Restore Point**: `_try_restore_from_history()` called on back navigation
 
-### 3.2 Error Handling Implementation Notes
+### 3.2 Chinese Pinyin Sorting Implementation
+The application provides intelligent file name sorting optimized for Chinese users using pinyin-based ordering.
+
+#### 3.2.1 Pinyin Sorting Architecture
+- **Library**: Uses `pypinyin` library for Chinese character to pinyin conversion
+- **Implementation**: `FileListCtrl.load_files()` applies automatic pinyin sorting
+- **Scope**: Applied to all file listings except history stack restorations
+- **Consistency**: Ensures uniform sorting behavior across all directories
+
+#### 3.2.2 Sorting Logic
+```python
+def chinese_sort_key(name):
+    """Convert Chinese filenames to pinyin for sorting"""
+    pinyin_list = pypinyin.lazy_pinyin(name)
+    return ''.join(pinyin_list)
+
+# Applied during file loading
+self.files.sort(key=lambda x: chinese_sort_key(x["name"]))
+```
+
+#### 3.2.3 Sorting Behavior
+- **New Directory Entry**: Automatic pinyin sorting applied on first load
+- **Manual Sorting**: Menu options for name, size, and date sorting with toggle capability
+- **History Stack Restoration**: Preserves original sorted order without re-sorting
+- **Mixed Content**: Handles Chinese, English, numbers, and special characters uniformly
+
+#### 3.2.4 User Experience
+- **Intuitive Ordering**: Files are sorted alphabetically by pinyin (e.g., 北京(B) < 上海(S) < 张三(Z))
+- **Cultural Consistency**: Follows Chinese user expectations for alphabetical ordering
+- **Performance**: Fast sorting with minimal overhead for typical file lists
+- **Reliability**: Consistent behavior across all directory operations
+
+#### 3.2.5 Menu Integration
+- **View Menu**: Access to sorting options (View → Sort by Name/Size/Date)
+- **Keyboard Support**: Alt+V shortcuts for menu navigation
+- **Toggle Functionality**: Each click switches between ascending/descending order
+- **Visual Feedback**: Current sort method indicated in menu state
+
+### 3.3 Error Handling Implementation Notes
 1. **No Mock Data** – API failures never return simulated files or example data; failures are transparent to users.
 2. **User-Friendly Dialogs** – API errors display modal dialogs with specific error messages and retry functionality.
 3. **Retry Mechanism** – Error dialogs include "重试" (Retry) and "确定" (OK) buttons; "确定" is the default button.
@@ -288,6 +327,14 @@ user_info = {
 - [ ] Navigation history correctly stores and restores positions.
 - [ ] Directory switching doesn't interrupt audio playback.
 
+### 7.2.1 Chinese Pinyin Sorting
+- [ ] New directories automatically apply pinyin sorting to file listings.
+- [ ] Chinese filenames are sorted alphabetically by pinyin (北京 < 上海 < 张三).
+- [ ] Mixed content (Chinese, English, numbers) sorts correctly and intuitively.
+- [ ] Manual sorting via View menu works correctly with ascending/descending toggle.
+- [ ] History stack restoration maintains consistent sorting behavior.
+- [ ] All directories show consistent pinyin-based ordering regardless of navigation path.
+
 ### 7.3 Error Handling
 - [ ] API failures display error dialogs with specific error messages.
 - [ ] Error dialogs show both "重试" (Retry) and "确定" (OK) buttons.
@@ -359,15 +406,58 @@ python demo_logger_switch.py    # Test logging system behavior
 - `CLAUDE.md` — (this document) engineering conventions
 - `AUDIO_PLAYER_UPDATE_SUMMARY.md` — playback change log
 
-**Current version**: v1.1.8 (Complete Audio Track Functionality)
-**Last update**: 12 Nov 2025
-**Highlights**: complete audio track detection and switching functionality for video playback, with accessibility support and dynamic menu system
+**Current version**: v1.1.9 (Chinese Pinyin Sorting)
+**Last update**: 13 Nov 2025
+**Highlights**: implemented intelligent Chinese pinyin-based file name sorting for improved user experience with consistent sorting behavior across all directories
 
 ---
 
 ## 10. Development History & Key Fixes
 
-### 10.1 Shortcut System & Playback Logic Evolution
+### 10.1 Chinese Pinyin Sorting Implementation (v1.1.9)
+
+#### Problem Analysis
+Chinese users experienced inconsistent file name ordering across different directories due to Unicode-based sorting, which doesn't align with pinyin alphabetical expectations. Files would appear in arbitrary order (e.g., 上海 < 北京) making navigation difficult for Chinese users.
+
+#### Technical Challenges
+- **Unicode vs Pinyin**: Native Unicode character ordering doesn't match Chinese alphabetical conventions
+- **Mixed Content Handling**: Need to sort Chinese, English, numbers, and special characters coherently
+- **History Stack Consistency**: Maintain sorting behavior during navigation with back/forward operations
+- **Performance Considerations**: Apply sorting efficiently without impacting file loading performance
+
+#### Implementation Details
+**Library Integration**: Added `pypinyin` dependency for intelligent Chinese character conversion
+
+**Core Algorithm**:
+```python
+def chinese_sort_key(name):
+    pinyin_list = pypinyin.lazy_pinyin(name)
+    return ''.join(pinyin_list)
+```
+
+**Sorting Strategy**:
+- **New Directory Loading**: Automatic pinyin sorting applied during `FileListCtrl.load_files()`
+- **History Stack Preservation**: Skip re-sorting during history restoration to maintain user context
+- **Manual Sorting Controls**: Enhanced View menu with toggle-based ascending/descending options
+
+**Architecture Changes**:
+- Modified `load_files()` method to apply consistent sorting across all directory operations
+- Updated `_save_current_state_to_history()` to preserve sorted file lists
+- Enhanced `_try_restore_from_history()` with skip-sorting mechanism for history restoration
+
+#### User Experience Improvements
+- **Intuitive Ordering**: Files now sort alphabetically by pinyin (北京 < 上海 < 张三)
+- **Consistent Behavior**: All directories display files in expected pinyin order
+- **Cultural Alignment**: Follows Chinese user expectations for alphabetical file organization
+- **Mixed Language Support**: Handles Chinese-English filenames correctly (e.g., 北京Beijing < 上海Shanghai)
+
+#### Technical Benefits
+- **Performance Optimized**: Efficient sorting with minimal overhead for typical file lists
+- **Reliable Implementation**: Consistent behavior regardless of navigation path or file types
+- **Maintainable Code**: Clear separation of sorting logic with comprehensive error handling
+- **Accessibility Compliant**: Maintains screen reader compatibility with sorted content
+
+### 10.2 Shortcut System & Playback Logic Evolution
 
 #### Problem Analysis (Historical)
 Early versions suffered from inconsistent shortcut behavior and confusing playback logic:
@@ -443,13 +533,14 @@ def _refresh_audio_tracks_menu(self):
 ## 11. Code Review Focus
 1. **Accessibility First**: All changes must maintain or improve screen reader support and keyboard navigation.
 2. **Navigation Consistency**: Directory navigation should preserve user context and provide predictable behavior.
-3. **Audio Integration**: Ensure audio playback is not interrupted by directory operations or file type processing.
-4. **Security Compliance**: Configuration data must remain encrypted and secure.
-5. **Error Handling**: API failures should be transparent to users with clear error messages and recovery options.
-6. **User Information Management**: Login process must successfully retrieve and store user information for dynamic path construction.
-7. **File Type Processing**: File handling must use API-returned `mime_type`, never filename extensions, with appropriate user feedback for different file types.
-8. **Path Construction**: Playback URLs must use dynamic user-based paths instead of hardcoded values.
-9. **Performance Impact**: Changes should not affect the silent-by-default logging performance.
-10. **Documentation Update**: New features must be documented in this guide before merge.
+3. **Chinese Localization**: File sorting must use pinyin-based ordering for optimal Chinese user experience.
+4. **Audio Integration**: Ensure audio playback is not interrupted by directory operations or file type processing.
+5. **Security Compliance**: Configuration data must remain encrypted and secure.
+6. **Error Handling**: API failures should be transparent to users with clear error messages and recovery options.
+7. **User Information Management**: Login process must successfully retrieve and store user information for dynamic path construction.
+8. **File Type Processing**: File handling must use API-returned `mime_type`, never filename extensions, with appropriate user feedback for different file types.
+9. **Path Construction**: Playback URLs must use dynamic user-based paths instead of hardcoded values.
+10. **Performance Impact**: Changes should not affect the silent-by-default logging performance.
+11. **Documentation Update**: New features must be documented in this guide before merge.
 
 When proposing a new convention or shortcut, update this guide in the same pull request. Thanks!
