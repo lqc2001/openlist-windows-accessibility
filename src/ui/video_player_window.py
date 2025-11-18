@@ -48,6 +48,12 @@ class VideoPlayerWindow(wx.Frame):
         self._menu_visible_time = 0
         self._alt_key_pressed = False
 
+        # 播放进度信息显示控制
+        self.show_progress_info = False  # 默认隐藏进度信息，提供完整的观影体验
+
+        # 菜单项引用（用于动态更新）
+        self.progress_info_menu_item = None
+
         # 临时退出全屏状态跟踪
         self._temporarily_exited_fullscreen = False
         self._fullscreen_restore_timer = None
@@ -192,6 +198,9 @@ class VideoPlayerWindow(wx.Frame):
         main_sizer.Add(self.control_label, 0, wx.EXPAND | wx.ALL, 10)
 
         main_panel.SetSizer(main_sizer)
+
+        # 默认隐藏进度信息，提供完整的观影体验
+        self._update_progress_info_visibility()
 
         # 设置焦点以接收键盘事件
         self.SetFocus()
@@ -852,6 +861,10 @@ class VideoPlayerWindow(wx.Frame):
         volume_down_item = play_menu.Append(wx.ID_ANY, "音量减少(&D)\tDown", "减少音量")
         play_menu.AppendSeparator()
 
+        # 播放信息控制
+        self.progress_info_menu_item = play_menu.Append(wx.ID_ANY, "显示播放信息", "显示所有播放信息（标题、时间进度、控制提示等）")
+        play_menu.AppendSeparator()
+
         # 倍速选择（简化）
         speed_menu = wx.Menu()
         speed_0_5x = speed_menu.AppendRadioItem(wx.ID_ANY, "0.5倍速(&5)", "0.5倍播放速度")
@@ -885,6 +898,7 @@ class VideoPlayerWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_seek_forward, seek_forward_item)
         self.Bind(wx.EVT_MENU, self.on_volume_up, volume_up_item)
         self.Bind(wx.EVT_MENU, self.on_volume_down, volume_down_item)
+        self.Bind(wx.EVT_MENU, self.on_toggle_progress_info, self.progress_info_menu_item)
         self.Bind(wx.EVT_MENU, self.on_speed_0_5, speed_0_5x)
         self.Bind(wx.EVT_MENU, self.on_speed_1_0, speed_1_0x)
         self.Bind(wx.EVT_MENU, self.on_speed_1_5, speed_1_5x)
@@ -896,6 +910,9 @@ class VideoPlayerWindow(wx.Frame):
         # 绑定标准wxPython事件
         self.Bind(wx.EVT_MENU, self.on_standard_help, id=wx.ID_HELP)
         self.Bind(wx.EVT_MENU, self.on_standard_about, id=wx.ID_ABOUT)
+
+        # 初始化菜单项状态
+        self._update_progress_info_menu_text()
 
         self.logger.info("标准菜单栏创建完成")
 
@@ -1119,8 +1136,8 @@ class VideoPlayerWindow(wx.Frame):
         elif key_code == wx.WXK_DOWN:
             self._volume_down()
 
-        # F键 - 切换全屏
-        elif key_code == ord('F') or key_code == ord('f'):
+        # F11键 - 切换全屏
+        elif key_code == wx.WXK_F11:
             self._toggle_fullscreen()
 
         else:
@@ -1313,6 +1330,71 @@ class VideoPlayerWindow(wx.Frame):
             self.logger.error(f"退出全屏失败: {e}")
             self.Close()
 
+    # 播放进度信息显示控制方法
+    def _toggle_progress_info(self, show=None):
+        """切换播放信息显示
+
+        Args:
+            show: 可选，True显示，False隐藏，None表示切换
+        """
+        if show is not None:
+            self.show_progress_info = show
+        else:
+            self.show_progress_info = not self.show_progress_info
+
+        # 更新界面可见性
+        self._update_progress_info_visibility()
+
+        # 更新菜单项文本
+        self._update_progress_info_menu_text()
+
+        self.logger.info(f"播放信息显示状态: {'显示' if self.show_progress_info else '隐藏'}")
+
+    def _update_progress_info_visibility(self):
+        """更新播放进度信息可见性"""
+        try:
+            # 控制所有播放相关信息显示（包括视频标题、时间进度、控制提示）
+            # 只有窗口标题栏保持显示播放状态
+            if hasattr(self, 'title_label'):
+                self.title_label.Show(self.show_progress_info)
+
+            if hasattr(self, 'time_label'):
+                self.time_label.Show(self.show_progress_info)
+
+            if hasattr(self, 'control_label'):
+                self.control_label.Show(self.show_progress_info)
+
+            # 刷新布局
+            if hasattr(self, 'main_panel'):
+                self.main_panel.Layout()
+                self.main_panel.Refresh()
+
+            self.logger.debug(f"播放信息可见性更新完成: {'显示' if self.show_progress_info else '隐藏'}")
+
+        except Exception as e:
+            self.logger.error(f"更新播放信息可见性失败: {e}")
+
+    def _show_progress_info(self):
+        """显示播放进度信息"""
+        self._toggle_progress_info(show=True)
+
+    def _hide_progress_info(self):
+        """隐藏播放进度信息"""
+        self._toggle_progress_info(show=False)
+
+    def _update_progress_info_menu_text(self):
+        """更新播放信息菜单项的文本"""
+        try:
+            if self.progress_info_menu_item:
+                if self.show_progress_info:
+                    self.progress_info_menu_item.SetItemLabel("隐藏播放信息")
+                    self.progress_info_menu_item.SetHelpText("隐藏所有播放信息（标题、时间进度、控制提示等）")
+                else:
+                    self.progress_info_menu_item.SetItemLabel("显示播放信息")
+                    self.progress_info_menu_item.SetHelpText("显示所有播放信息（标题、时间进度、控制提示等）")
+        except Exception as e:
+            self.logger.error(f"更新播放信息菜单项文本失败: {e}")
+
     # 菜单事件处理方法
     
     # 视频播放器的菜单事件处理方法
@@ -1382,6 +1464,14 @@ class VideoPlayerWindow(wx.Frame):
             self.logger.info("菜单音量减少操作完成")
         except Exception as e:
             self.logger.error(f"菜单音量减少失败: {e}")
+
+    def on_toggle_progress_info(self, event):
+        """切换播放信息显示的菜单事件"""
+        try:
+            self._toggle_progress_info()
+            self.logger.info("菜单播放信息显示切换操作完成")
+        except Exception as e:
+            self.logger.error(f"菜单播放信息显示切换失败: {e}")
 
     def on_speed_0_5(self, event):
         """0.5倍速菜单事件"""
@@ -1469,7 +1559,7 @@ class VideoPlayerWindow(wx.Frame):
 基本控制：
 - 空格键：播放/暂停
 - ESC键：退出视频播放
-- F键：切换全屏模式
+- F11键：切换全屏模式
 
 播放控制：
 - 左箭头：快退10秒
@@ -1487,8 +1577,11 @@ class VideoPlayerWindow(wx.Frame):
 - Ctrl+Up/Down：音量增减
 
 其他功能：
-- 全屏模式：点击菜单或按F键切换
-- 截图功能：开发中"""
+- 全屏模式：点击菜单或按F11键切换
+- 播放信息控制：点击菜单显示/隐藏所有播放信息（标题、时间进度、控制提示等）
+- 截图功能：开发中
+
+注意：默认隐藏所有播放信息以提供完全沉浸的观影体验，只有窗口标题栏显示播放状态。需要时可使用菜单显示详细播放信息。"""
 
         wx.MessageBox(help_text, "视频播放控制说明", wx.OK | wx.ICON_INFORMATION)
 

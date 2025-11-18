@@ -246,7 +246,7 @@ The `on_context_web_open()` method handles browser-based file opening:
 - `ESC` — exit video player and return to file browser
 - `Left / Right` — seek backward/forward 10 seconds
 - `Up / Down` — volume up/down
-- `F` — toggle fullscreen mode
+- `F11` — toggle fullscreen mode
 - `Alt+P` — show/hide menu with full video controls
 - **Audio Track Switching**: Alt+P → 音轨(T) → select track (multi-language videos only)
 
