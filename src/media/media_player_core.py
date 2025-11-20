@@ -546,7 +546,9 @@ class MediaPlayerCore:
             # 方法1: 首先检查是否有媒体正在播放 (最可靠的方法)
             try:
                 track_count = self.vlc_player.audio_get_track_count()
-                self.logger.debug(f"VLC audio_get_track_count() 返回: {track_count}")
+                self.logger.info(f"=== 音轨检测开始 ===")
+                self.logger.info(f"VLC audio_get_track_count() 返回: {track_count}")
+                self.logger.info(f"当前播放状态: is_playing={self.is_playing if hasattr(self, 'is_playing') else 'unknown'}")
 
                 # VLC返回-1表示没有媒体或错误，>0表示有音轨，0表示媒体存在但没有音轨
                 if track_count > 0:
@@ -556,39 +558,55 @@ class MediaPlayerCore:
                         self.logger.debug(f"VLC audio_get_track_description() 返回: {track_description}")
 
                         if track_description and len(track_description) > 0:
+                            self.logger.info(f"VLC audio_get_track_description() 返回: {track_description}")
                             # 使用VLC提供的轨道描述
                             for track_id, track_name in track_description:
+                                self.logger.info(f"处理VLC音轨描述: ID={track_id}, 名称={track_name}")
+
                                 # 处理轨道名称（可能是bytes类型）
                                 if isinstance(track_name, bytes):
                                     try:
                                         track_name = track_name.decode('utf-8')
+                                        self.logger.info(f"解码bytes音轨名称: {track_name}")
                                     except:
                                         track_name = str(track_name)
+                                        self.logger.info(f"字符串转换音轨名称: {track_name}")
 
                                 # 跳过"禁用"选项（track_id为-1）
-                                if track_id == -1 and "禁用" in track_name:
+                                if track_id == -1 and ("禁用" in track_name or "Disable" in track_name):
+                                    self.logger.info(f"跳过禁用轨道: ID={track_id}, 名称={track_name}")
                                     continue
 
-                                # 包含所有有效轨道（包括ID为0的轨道）
+                                # 只包含有效的音轨ID（跳过-1的特殊轨道）
                                 if track_id >= 0:
                                     audio_tracks.append({
                                         'id': track_id,
-                                        'name': track_name or f"音轨 {track_id}",
+                                        'name': track_name or f"音轨 {track_id + 1}",
                                         'language': '',
                                         'type': 'audio'
                                     })
+                                    self.logger.info(f"添加有效音轨: ID={track_id}, 名称='{track_name or f'音轨 {track_id + 1}'}")
 
-                            # 如果从描述中获取的轨道数量少于实际数量，补充默认轨道
+                            # 检查是否需要补充轨道
                             if len(audio_tracks) < track_count:
+                                self.logger.info(f"轨道数量不足，需要补充: {len(audio_tracks)}/{track_count}")
                                 existing_ids = {track['id'] for track in audio_tracks}
+                                self.logger.info(f"已存在的轨道ID: {existing_ids}")
+
                                 for i in range(track_count):
                                     if i not in existing_ids:
+                                        self.logger.info(f"补充缺失音轨ID: {i}")
                                         audio_tracks.append({
                                             'id': i,
                                             'name': f"音轨 {i + 1}",
                                             'language': '',
                                             'type': 'audio'
                                         })
+                                        self.logger.info(f"已补充音轨: ID={i}, 名称='音轨 {i + 1}'")
+                                    else:
+                                        self.logger.debug(f"音轨ID {i} 已存在，跳过补充")
+                            else:
+                                self.logger.info(f"轨道数量足够，无需补充: {len(audio_tracks)} >= {track_count}")
                         else:
                             # 如果没有描述，基于数量创建默认音轨
                             # VLC音轨ID可能从0开始，所以从0开始编号
