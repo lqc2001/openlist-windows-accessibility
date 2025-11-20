@@ -587,22 +587,27 @@ class MediaPlayerCore:
                                     })
                                     self.logger.info(f"添加有效音轨: ID={track_id}, 名称='{track_name or f'音轨 {track_id + 1}'}")
 
-                            # 修复：不再使用track_count作为补充依据
-                            # track_count可能包含无效或不可用的轨道，应该以实际获取到的音轨为准
-                            if len(audio_tracks) == 0 and track_count > 0:
-                                # 只有当完全没有获取到音轨时，才基于track_count创建默认音轨
-                                self.logger.warning(f"未获取到任何音轨描述，基于track_count={track_count}创建默认音轨")
-                                for i in range(track_count):
-                                    audio_tracks.append({
-                                        'id': i,
-                                        'name': f"音轨 {i + 1}",
-                                        'language': '',
-                                        'type': 'audio'
-                                    })
-                                    self.logger.info(f"创建默认音轨: ID={i}, 名称='音轨 {i + 1}'")
+                            # 智能音轨处理：根据VLC状态决定是否创建默认音轨
+                            if len(audio_tracks) == 0:
+                                # 情况1: 完全没有音轨描述，但VLC报告有音轨，可能是VLC还未完全解析
+                                if track_count > 0:
+                                    self.logger.warning(f"音轨描述为空但VLC报告{track_count}个音轨，创建默认音轨")
+                                    for i in range(track_count):
+                                        audio_tracks.append({
+                                            'id': i,
+                                            'name': f"音轨 {i + 1}",
+                                            'language': '',
+                                            'type': 'audio'
+                                        })
+                                        self.logger.info(f"创建默认音轨: ID={i}, 名称='音轨 {i + 1}'")
+                                else:
+                                    self.logger.info("VLC报告无音轨，跳过音轨创建")
+                            elif len(audio_tracks) < track_count:
+                                # 情况2: 有部分音轨但数量不足，优先使用真实音轨，不补充避免重复
+                                self.logger.info(f"获取到{len(audio_tracks)}个真实音轨，VLC报告{track_count}个，以真实音轨为准")
                             else:
-                                # 有音轨描述时，以描述为准，不进行补充
-                                self.logger.info(f"基于VLC描述获取到 {len(audio_tracks)} 个有效音轨，无需补充")
+                                # 情况3: 音轨数量正常
+                                self.logger.info(f"获取到{len(audio_tracks)}个音轨，数量正常")
                         else:
                             # 如果没有描述，基于数量创建默认音轨
                             # VLC音轨ID可能从0开始，所以从0开始编号

@@ -450,6 +450,32 @@ class VideoPlayerWindow(wx.Frame):
         except Exception as e:
             self.logger.error(f"[DEBUG] 手动刷新音频轨道列表失败: {e}")
 
+    def _refresh_audio_tracks_menu_fallback(self):
+        """音轨菜单回退检测（确保VLC完全解析后的第二次检测）"""
+        try:
+            self.logger.info("[DEBUG] 执行音轨菜单回退检测（4000ms后）")
+
+            if self.video_player:
+                # 获取当前音轨数量
+                tracks = self.video_player.get_available_audio_tracks()
+                self.logger.info(f"[DEBUG] 回退检测获取到{len(tracks)}个音频轨道")
+
+                # 如果还是没有音轨，再尝试一次
+                if len(tracks) == 0:
+                    self.logger.warning("[DEBUG] 4000ms后仍无音轨，可能该视频确实没有多音轨")
+                else:
+                    self.logger.info(f"[DEBUG] 4000ms后成功获取到音轨，详情:")
+                    for i, track in enumerate(tracks):
+                        self.logger.info(f"[DEBUG]   轨道{i+1}: ID={track.get('id')}, 名称={track.get('name')}")
+
+                # 无论是否有音轨，都更新一次菜单
+                self._refresh_audio_tracks_menu()
+            else:
+                self.logger.warning("[DEBUG] video_player为None，无法执行回退检测")
+
+        except Exception as e:
+            self.logger.error(f"[DEBUG] 音轨菜单回退检测失败: {e}")
+
     def _refresh_audio_tracks_menu(self):
         """刷新音轨菜单（内部方法）"""
         try:
@@ -1642,9 +1668,12 @@ class VideoPlayerWindow(wx.Frame):
         wx.CallAfter(self._update_display)
         wx.CallAfter(self._start_progress_timer)
 
-        # 视频开始播放时，更新音轨菜单（这时VLC已经解析了媒体信息）
-        self.logger.info("[DEBUG] 准备在2000ms后刷新音轨菜单")
+        # 视频开始播放时，分阶段更新音轨菜单，确保VLC完全解析
+        self.logger.info("[DEBUG] 准备分阶段刷新音轨菜单")
+        # 第一次检测：2000ms后（通常VLC已经基本解析完成）
         wx.CallLater(2000, self._refresh_audio_tracks_menu)
+        # 第二次检测：4000ms后（确保VLC完全解析，补充第一次可能遗漏的音轨）
+        wx.CallLater(4000, self._refresh_audio_tracks_menu_fallback)
 
     def _on_video_pause(self):
         """视频暂停回调"""
